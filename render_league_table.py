@@ -11,7 +11,7 @@ import glob
 import json
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 
 VALID_SOURCES = ["dtai", "opta"]
 
@@ -426,10 +426,10 @@ def main():
     historical_series = build_historical_series(sweepstake, historical_data)
     html = render_html(standings, sources, fetched_ats, historical_series)
 
-    with open("league_table.html", "w") as f:
+    with open("index.html", "w") as f:
         f.write(html)
 
-    print(f"\nLeague table written to league_table.html\n")
+    print(f"\nLeague table written to index.html\n")
     print(f"{'Rank':<5} {'Player':<10} {'Win Chance'}")
     print("-" * 30)
     for i, entry in enumerate(standings, 1):

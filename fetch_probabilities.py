@@ -93,8 +93,21 @@ def fetch_opta():
 SOURCES = {"dtai": fetch_dtai, "opta": fetch_opta}
 
 
+def _latest_probabilities(source):
+    files = sorted(f for f in os.listdir(source) if f.startswith("probabilities_") and f.endswith(".json"))
+    if not files:
+        return None
+    with open(os.path.join(source, files[-1])) as f:
+        return json.load(f).get("probabilities", {})
+
+
 def save(source, probabilities, source_url, model_updated_at):
     os.makedirs(source, exist_ok=True)
+
+    existing = _latest_probabilities(source)
+    if existing is not None and existing == probabilities:
+        return None
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -121,6 +134,10 @@ def main():
 
     probabilities, source_url, model_updated_at = SOURCES[source]()
     filename = save(source, probabilities, source_url, model_updated_at)
+
+    if filename is None:
+        print(f"\nProbabilities unchanged — no new file written")
+        return
 
     print(f"\nSaved {len(probabilities)} teams to {filename}")
     for team, prob in list(probabilities.items())[:10]:
