@@ -343,9 +343,13 @@ def render_html(standings, sources, fetched_ats, historical_series):
     }}
 
     const datasets = {chart_datasets};
+    const sortedDatasets = [...datasets].sort((a, b) => {{
+      const latestY = ds => ds.data[ds.data.length - 1].y;
+      return latestY(b) - latestY(a);
+    }});
     new Chart(document.getElementById('historyChart'), {{
       type: 'line',
-      data: {{ datasets }},
+      data: {{ datasets: sortedDatasets }},
       options: {{
         responsive: true,
         maintainAspectRatio: false,

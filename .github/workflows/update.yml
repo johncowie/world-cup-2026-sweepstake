@@ -18,6 +18,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Run tests
+        run: python3 -m unittest test_render -v
+
       - name: Fetch latest probabilities
         run: python3 fetch_probabilities.py opta
 
