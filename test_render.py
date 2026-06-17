@@ -45,8 +45,11 @@ HTML = render_league_table.render_html(
 
 class TestRenderedHTML(unittest.TestCase):
 
-    def test_legend_position_right(self):
-        self.assertIn("position: 'right'", HTML)
+    def test_legend_is_custom_html(self):
+        # Chart.js built-in legend is hidden; custom HTML legend is used instead
+        self.assertIn("legend: { display: false }", HTML)
+        self.assertIn('id="chart-legend"', HTML)
+        self.assertIn("legend-avatar", HTML)
 
     def test_datasets_sorted_by_latest_y(self):
         self.assertIn("sortedDatasets", HTML)

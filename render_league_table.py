@@ -7,6 +7,7 @@ Usage:
     python3 render_league_table.py dtai opta
 """
 
+import base64
 import glob
 import json
 import os
@@ -141,6 +142,37 @@ def build_historical_series(sweepstake, historical_data):
     return series
 
 
+def load_avatars():
+    """Returns {name_lower: data_uri} for each JPEG in avatars/."""
+    result = {}
+    avatar_dir = "avatars"
+    if not os.path.isdir(avatar_dir):
+        return result
+    for fname in sorted(os.listdir(avatar_dir)):
+        if fname.lower().endswith(".jpg") or fname.lower().endswith(".jpeg"):
+            name = os.path.splitext(fname)[0].lower()
+            with open(os.path.join(avatar_dir, fname), "rb") as f:
+                data = base64.b64encode(f.read()).decode()
+            result[name] = f"data:image/jpeg;base64,{data}"
+    return result
+
+
+def initials_svg(name, color):
+    """Returns a data-URI SVG circle with the player's initials."""
+    parts = name.split()
+    initials = "".join(p[0].upper() for p in parts[:2])
+    svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120">'
+        f'<circle cx="60" cy="60" r="60" fill="{color}33"/>'
+        f'<text x="60" y="76" text-anchor="middle" fill="{color}" '
+        f'font-size="44" font-weight="bold" '
+        f'font-family="-apple-system,BlinkMacSystemFont,sans-serif">{initials}</text>'
+        f'</svg>'
+    )
+    b64 = base64.b64encode(svg.encode()).decode()
+    return f"data:image/svg+xml;base64,{b64}"
+
+
 def load_sweepstake():
     with open("sweepstake.json") as f:
         return json.load(f)
@@ -161,7 +193,7 @@ def build_standings(sweepstake, probabilities):
     return standings
 
 
-def render_html(standings, sources, fetched_ats, historical_series):
+def render_html(standings, sources, fetched_ats, historical_series, avatars=None):
     if len(sources) == 1:
         source_label = SOURCE_LABELS[sources[0]]
         source_desc = f'<a href="{SOURCE_URLS[sources[0]]}" style="color:#3a6a99">{source_label}</a>'
@@ -169,8 +201,26 @@ def render_html(standings, sources, fetched_ats, historical_series):
         links = [f'<a href="{SOURCE_URLS[s]}" style="color:#3a6a99">{SOURCE_LABELS[s]}</a>' for s in sources]
         source_desc = "Average of " + " &amp; ".join(links)
 
+    if avatars is None:
+        avatars = {}
+
     latest_fetch = max(fetched_ats)
     fetched_str = datetime.fromisoformat(latest_fetch).strftime("%d %b %Y, %H:%M UTC")
+
+    # Map player name → chart colour (assigned by position in historical_series)
+    player_color = {
+        s["name"]: PLAYER_COLORS[i % len(PLAYER_COLORS)]
+        for i, s in enumerate(historical_series)
+    }
+
+    def avatar_src(name):
+        return avatars.get(name.lower()) or initials_svg(name, player_color.get(name, "#7a8499"))
+
+    # Build avatar map for JS legend: {lowercase_name: data_uri}
+    avatar_json = json.dumps({
+        s["name"].lower(): avatar_src(s["name"])
+        for s in historical_series
+    })
 
     rows = ""
     for i, entry in enumerate(standings, 1):
@@ -180,10 +230,11 @@ def render_html(standings, sources, fetched_ats, historical_series):
             country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
 
         medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, "")
+        av = avatar_src(entry["name"])
         rows += f"""
         <tr class="{'top3' if i <= 3 else ''}">
             <td class="rank">{medal or i}</td>
-            <td class="person">{entry['name']}</td>
+            <td class="person"><div class="person-cell"><img class="avatar" src="{av}" alt="{entry['name']}"><span>{entry['name']}</span></div></td>
             <td class="countries">{country_pills}</td>
             <td class="total">{entry['total']:.1%}</td>
         </tr>"""
@@ -276,7 +327,9 @@ def render_html(standings, sources, fetched_ats, historical_series):
     tbody tr.top3:hover {{ background: #142540; }}
     td {{ padding: 1rem; vertical-align: middle; }}
     td.rank {{ font-size: 1.3rem; width: 3rem; text-align: center; color: #7a8499; font-weight: 700; }}
-    td.person {{ font-weight: 700; font-size: 1.05rem; width: 8rem; }}
+    td.person {{ font-weight: 700; font-size: 1.05rem; width: 10rem; }}
+    .person-cell {{ display: flex; align-items: center; gap: 0.55rem; }}
+    .avatar {{ width: 36px; height: 36px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }}
     td.countries {{ line-height: 1.8; }}
     td.total {{
       font-size: 1.4rem;
@@ -301,7 +354,11 @@ def render_html(standings, sources, fetched_ats, historical_series):
     .pill-prob {{ color: #7a8499; font-size: 0.75rem; }}
     footer {{ text-align: center; margin-top: 2.5rem; color: #3a4a60; font-size: 0.8rem; }}
     footer a {{ color: #3a6a99; text-decoration: none; }}
-    .chart-wrap {{ position: relative; height: 500px; }}
+    .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
+    .chart-wrap {{ flex: 1; position: relative; height: 500px; min-width: 0; }}
+    .chart-legend {{ flex-shrink: 0; display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.25rem; }}
+    .legend-item {{ display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; color: #e8eaf0; }}
+    .legend-avatar {{ width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 2.5px solid; flex-shrink: 0; }}
   </style>
 </head>
 <body>
@@ -329,8 +386,11 @@ def render_html(standings, sources, fetched_ats, historical_series):
       </table>
     </div>
     <div id="page-history" class="tab-page">
-      <div class="chart-wrap">
-        <canvas id="historyChart"></canvas>
+      <div class="history-wrap">
+        <div class="chart-wrap">
+          <canvas id="historyChart"></canvas>
+        </div>
+        <div class="chart-legend" id="chart-legend"></div>
       </div>
     </div>
   </div>
@@ -343,6 +403,7 @@ def render_html(standings, sources, fetched_ats, historical_series):
     }}
 
     const datasets = {chart_datasets};
+    const avatarData = {avatar_json};
     const sortedDatasets = [...datasets].sort((a, b) => {{
       const latestY = ds => ds.data[ds.data.length - 1].y;
       return latestY(b) - latestY(a);
@@ -374,10 +435,7 @@ def render_html(standings, sources, fetched_ats, historical_series):
           }},
         }},
         plugins: {{
-          legend: {{
-            position: 'right',
-            labels: {{ color: '#e8eaf0', boxWidth: 12 }},
-          }},
+          legend: {{ display: false }},
           tooltip: {{
             backgroundColor: '#0e1e35',
             borderColor: '#1e2d45',
@@ -391,6 +449,15 @@ def render_html(standings, sources, fetched_ats, historical_series):
           }},
         }},
       }},
+    }});
+    // Build custom avatar legend in sorted order
+    const legendEl = document.getElementById('chart-legend');
+    sortedDatasets.forEach(ds => {{
+      const src = avatarData[ds.label.toLowerCase()] || '';
+      const item = document.createElement('div');
+      item.className = 'legend-item';
+      item.innerHTML = `<img class="legend-avatar" src="${{src}}" style="border-color:${{ds.borderColor}}" alt="${{ds.label}}"><span>${{ds.label}}</span>`;
+      legendEl.appendChild(item);
     }});
   </script>
 </body>
@@ -419,7 +486,8 @@ def main():
     standings = build_standings(sweepstake, probabilities)
     historical_data = load_all_for_sources(sources)
     historical_series = build_historical_series(sweepstake, historical_data)
-    html = render_html(standings, sources, fetched_ats, historical_series)
+    avatars = load_avatars()
+    html = render_html(standings, sources, fetched_ats, historical_series, avatars)
 
     with open("index.html", "w") as f:
         f.write(html)
