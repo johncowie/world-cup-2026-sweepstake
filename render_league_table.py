@@ -106,9 +106,8 @@ def load_and_average(sources):
 
 
 def load_all_for_sources(sources):
-    """Returns list of (date_str, averaged_probabilities) for all historical files, grouped by day."""
-    from collections import defaultdict
-    by_date = defaultdict(list)
+    """Returns list of (datetime_str, probabilities) for all historical files."""
+    entries = []
 
     for source in sources:
         files = sorted(glob.glob(os.path.join(source, "probabilities_*.json")))
@@ -123,20 +122,11 @@ def load_all_for_sources(sources):
                 else:
                     normalised[key] = prob
             fetched_at = datetime.fromisoformat(data["fetched_at"])
-            date_str = fetched_at.strftime("%Y-%m-%d")
-            by_date[date_str].append(normalised)
+            datetime_str = fetched_at.strftime("%Y-%m-%dT%H:%M:%S")
+            entries.append((datetime_str, normalised))
 
-    result = []
-    for date_str in sorted(by_date.keys()):
-        probs_list = by_date[date_str]
-        all_countries = set().union(*[p.keys() for p in probs_list])
-        averaged = {
-            country: sum(p.get(country, 0.0) for p in probs_list) / len(probs_list)
-            for country in all_countries
-        }
-        result.append((date_str, averaged))
-
-    return result
+    entries.sort(key=lambda x: x[0])
+    return entries
 
 
 def build_historical_series(sweepstake, historical_data):
@@ -365,7 +355,7 @@ def render_html(standings, sources, fetched_ats, historical_series):
             type: 'time',
             min: '2026-06-11',
             max: '2026-07-19',
-            time: {{ unit: 'day', tooltipFormat: 'd MMM yyyy' }},
+            time: {{ unit: 'day', tooltipFormat: 'd MMM yyyy HH:mm' }},
             grid: {{ color: '#1e2d45' }},
             ticks: {{ color: '#7a8499' }},
           }},
