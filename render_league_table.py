@@ -371,6 +371,7 @@ def render_html(standings, sources, fetched_ats, historical_series):
         }},
         plugins: {{
           legend: {{
+            position: 'right',
             labels: {{ color: '#e8eaf0', boxWidth: 12 }},
           }},
           tooltip: {{
