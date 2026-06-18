@@ -5,7 +5,7 @@
   },
   {
     "name": "John",
-    "countries": ["Netherlands", "Australia", "Uzbekistan", "Ghana"]
+    "countries": ["Netherlands", "Uzbekistan", "Ghana"]
   },
   {
     "name": "Bill",
@@ -47,5 +47,9 @@
   {
     "name": "Robert",
     "countries": ["France", "Japan", "Panama", "Sweden"]
+  },
+  {
+    "name": "Jakob",
+    "countries": ["Australia"]
   }
 ]
