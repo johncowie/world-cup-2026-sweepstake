@@ -46,6 +46,7 @@
   },
   {
     "name": "Robert",
+    "avatar": "avatars/robert.jpg",
     "countries": ["France", "Japan", "Panama", "Sweden"]
   }
 ]
