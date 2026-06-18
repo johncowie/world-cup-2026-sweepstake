@@ -1,6 +1,12 @@
 name: Update sweepstake
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'sweepstake.json'
+      - 'avatars/**'
+      - 'render_league_table.py'
   schedule:
     - cron: '0 */2 * * *'
   workflow_dispatch:
