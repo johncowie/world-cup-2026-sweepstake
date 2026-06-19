@@ -128,6 +128,13 @@ class TestRenderedHTML(unittest.TestCase):
     def test_set_stage_function_present(self):
         self.assertIn("function setStage(stageKey)", HTML)
 
+    def test_x_axis_min_computed_dynamically_per_stage(self):
+        # The chart should use stageMinDate() to set x.min on stage change,
+        # not a hardcoded date, so stages with sparse history don't show empty space.
+        self.assertIn("function stageMinDate(stageKey)", HTML)
+        self.assertIn("historyChart.options.scales.x.min = stageMinDate(stageKey)", HTML)
+        self.assertIn("min: stageMinDate('winner')", HTML)
+
     def test_all_datasets_json_has_all_stages(self):
         # allDatasets JS object should include all stage keys
         for key, _, _, _ in render_league_table.STAGE_OPTIONS:

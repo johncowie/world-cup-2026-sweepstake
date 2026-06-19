@@ -518,6 +518,17 @@ def render_html(all_standings, all_historical_series, sources, fetched_ats, avat
       }});
     }}
 
+    function stageMinDate(stageKey) {{
+      const datasets = allDatasets[stageKey] || [];
+      let min = null;
+      for (const ds of datasets) {{
+        for (const pt of ds.data) {{
+          if (min === null || pt.x < min) min = pt.x;
+        }}
+      }}
+      return min;
+    }}
+
     function setStage(stageKey) {{
       document.querySelectorAll('[id^="tbody-"]').forEach(el => el.style.display = 'none');
       const tbody = document.getElementById('tbody-' + stageKey);
@@ -526,6 +537,7 @@ def render_html(all_standings, all_historical_series, sources, fetched_ats, avat
       const sortedDatasets = sortDatasets(allDatasets[stageKey] || []);
       historyChart.data.datasets = sortedDatasets;
       historyChart.options.scales.y.title.text = stageChartLabels[stageKey] || stageKey;
+      historyChart.options.scales.x.min = stageMinDate(stageKey);
       historyChart.update();
       buildLegend(sortedDatasets);
     }}
@@ -541,7 +553,7 @@ def render_html(all_standings, all_historical_series, sources, fetched_ats, avat
         scales: {{
           x: {{
             type: 'time',
-            min: '2026-06-11',
+            min: stageMinDate('winner'),
             max: '2026-07-19',
             time: {{ unit: 'day', tooltipFormat: 'd MMM yyyy HH:mm' }},
             grid: {{ color: '#1e2d45' }},
