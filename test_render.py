@@ -25,7 +25,7 @@ PROBABILITIES = {
     "Germany": 0.10,
 }
 
-# Produces: Alice=35%, Bob=40% — Bob leads
+# Produces: Alice=32%, Bob=37% — Bob leads (combined_probability, not sum)
 STANDINGS = render_league_table.build_standings(SWEEPSTAKE, PROBABILITIES)
 
 HISTORICAL = [
@@ -86,7 +86,7 @@ class TestRenderedHTML(unittest.TestCase):
                 os.chdir(orig)
 
     def test_standings_order(self):
-        # Bob (Spain+Germany=40%) should rank above Alice (Brazil+France=35%)
+        # Bob (Spain+Germany=37%) should rank above Alice (Brazil+France=32%)
         self.assertEqual(STANDINGS[0]["name"], "Bob")
         self.assertEqual(STANDINGS[1]["name"], "Alice")
 
@@ -153,6 +153,36 @@ class TestHistoricalSeriesStageFiltering(unittest.TestCase):
         series = render_league_table.build_historical_series(SWEEPSTAKE, HISTORICAL)
         for s in series:
             self.assertEqual(len(s["data"]), 2)
+
+
+class TestCombinedProbability(unittest.TestCase):
+
+    def test_single_team_at_100_percent(self):
+        # If one team is guaranteed through, the combined probability should be 100%
+        self.assertAlmostEqual(render_league_table.combined_probability([1.0]), 1.0)
+
+    def test_single_team_at_100_with_others(self):
+        # A certain team dominates regardless of others
+        self.assertAlmostEqual(render_league_table.combined_probability([1.0, 0.5, 0.3]), 1.0)
+
+    def test_two_teams_combined_is_not_sum(self):
+        # 1 - (1-0.6)*(1-0.6) = 0.84, not 1.2
+        self.assertAlmostEqual(render_league_table.combined_probability([0.6, 0.6]), 0.84)
+
+    def test_empty_returns_zero(self):
+        self.assertAlmostEqual(render_league_table.combined_probability([]), 0.0)
+
+    def test_standings_total_uses_combined_probability(self):
+        # Alice: 1-(0.8*0.85)=0.32, Bob: 1-(0.7*0.9)=0.37
+        alice = next(s for s in STANDINGS if s["name"] == "Alice")
+        bob = next(s for s in STANDINGS if s["name"] == "Bob")
+        self.assertAlmostEqual(alice["total"], 0.32, places=10)
+        self.assertAlmostEqual(bob["total"], 0.37, places=10)
+
+    def test_historical_series_uses_combined_probability(self):
+        # Alice at t=0: Brazil=0.20, France=0.15 → 1-(0.80*0.85)=0.32 → 32.0%
+        alice_series = next(s for s in HISTORICAL_SERIES if s["name"] == "Alice")
+        self.assertAlmostEqual(alice_series["data"][0]["y"], 32.0, places=5)
 
 
 class TestFetchProbabilities(unittest.TestCase):

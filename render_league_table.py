@@ -153,6 +153,14 @@ def load_all_for_sources(sources):
     return entries
 
 
+def combined_probability(individual_probs):
+    """P(at least one succeeds) = 1 - product(1 - p) for each p."""
+    result = 1.0
+    for p in individual_probs:
+        result *= (1.0 - p)
+    return 1.0 - result
+
+
 def build_historical_series(sweepstake, historical_data, stage_key="winner"):
     """Returns list of {name, data: [{x, y}]} per player, skipping entries without stage data."""
     series = []
@@ -162,7 +170,8 @@ def build_historical_series(sweepstake, historical_data, stage_key="winner"):
             probs = stage_probs.get(stage_key)
             if not probs:
                 continue
-            total = sum(probs.get(country, 0.0) for country in person["countries"])
+            individual = [probs.get(country, 0.0) for country in person["countries"]]
+            total = combined_probability(individual)
             data_points.append({"x": date_str, "y": round(total * 100, 2)})
         series.append({"name": person["name"], "data": data_points})
     return series
@@ -208,12 +217,11 @@ def build_standings(sweepstake, probabilities):
     standings = []
     for person in sweepstake:
         countries = []
-        total = 0.0
         for country_name in person["countries"]:
             prob = probabilities.get(country_name, 0.0)
             code = COUNTRY_CODES.get(country_name)
             countries.append({"name": country_name, "code": code, "prob": prob})
-            total += prob
+        total = combined_probability([c["prob"] for c in countries])
         standings.append({"name": person["name"], "countries": countries, "total": total})
     standings.sort(key=lambda x: x["total"], reverse=True)
     return standings
