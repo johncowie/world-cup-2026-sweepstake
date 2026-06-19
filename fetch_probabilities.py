@@ -30,7 +30,7 @@ def fetch_dtai():
             probabilities[name] = p if p is not None else 0.0
 
     probabilities = dict(sorted(probabilities.items(), key=lambda x: x[1], reverse=True))
-    return probabilities, DTAI_URL, None
+    return probabilities, None, DTAI_URL, None
 
 
 # --- Opta ---
@@ -42,7 +42,16 @@ OPTA_SIMULATIONS_URL = (
     f"seasonandtournamentsimulations?tmcl={OPTA_TOURNAMENT_CALENDAR_ID}"
 )
 OPTA_SOURCE_URL = "https://theanalyst.com/competition/fifa-world-cup/predictions"
-OPTA_WIN_TYPE_ID = "2"
+
+# (opta_stage_name, type_id, our_key)
+OPTA_STAGE_KEYS = [
+    ("16th Finals", "1", "last32"),
+    ("8th Finals", "1", "last16"),
+    ("Quarter-finals", "1", "qf"),
+    ("Semi-finals", "1", "sf"),
+    ("Final", "1", "final"),
+    ("Final", "2", "winner"),
+]
 
 
 def _opta_get_session_cookie():
@@ -69,23 +78,28 @@ def fetch_opta():
         data = json.loads(resp.read().decode())
 
     stages = data["stages"]["stage"]
-    final_stage = next((s for s in stages if s["name"] == "Final"), None)
-    if not final_stage:
-        raise ValueError("Could not find 'Final' stage in Opta simulations data")
+    stage_by_name = {s["name"]: s for s in stages}
 
     last_updated = None
-    probabilities = {}
-    for contestant in final_stage["contestants"]["contestant"]:
-        name = contestant["name"]
-        for prediction in contestant.get("predictions", []):
-            if last_updated is None:
-                last_updated = prediction.get("lastUpdated")
-            for pred in prediction.get("predicted", []):
-                if pred.get("typeId") == OPTA_WIN_TYPE_ID:
-                    probabilities[name] = float(pred["value"].rstrip("%")) / 100.0
+    stage_probabilities = {}
 
-    probabilities = dict(sorted(probabilities.items(), key=lambda x: x[1], reverse=True))
-    return probabilities, OPTA_SOURCE_URL, last_updated
+    for stage_name, type_id, key in OPTA_STAGE_KEYS:
+        stage = stage_by_name.get(stage_name)
+        if not stage:
+            continue
+        probs = {}
+        for contestant in stage["contestants"]["contestant"]:
+            name = contestant["name"]
+            for prediction in contestant.get("predictions", []):
+                if last_updated is None:
+                    last_updated = prediction.get("lastUpdated")
+                for pred in prediction.get("predicted", []):
+                    if pred.get("typeId") == type_id:
+                        probs[name] = float(pred["value"].rstrip("%")) / 100.0
+        stage_probabilities[key] = dict(sorted(probs.items(), key=lambda x: x[1], reverse=True))
+
+    winner_probs = stage_probabilities.get("winner", {})
+    return winner_probs, stage_probabilities, OPTA_SOURCE_URL, last_updated
 
 
 # --- Common ---
@@ -98,14 +112,16 @@ def _latest_probabilities(source):
     if not files:
         return None
     with open(os.path.join(source, files[-1])) as f:
-        return json.load(f).get("probabilities", {})
+        data = json.load(f)
+    return data.get("stage_probabilities") or data.get("probabilities", {})
 
 
-def save(source, probabilities, source_url, model_updated_at):
+def save(source, probabilities, source_url, model_updated_at, stage_probabilities=None):
     os.makedirs(source, exist_ok=True)
 
     existing = _latest_probabilities(source)
-    if existing is not None and existing == probabilities:
+    comparable = stage_probabilities if stage_probabilities is not None else probabilities
+    if existing is not None and existing == comparable:
         return None
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -114,6 +130,8 @@ def save(source, probabilities, source_url, model_updated_at):
         "source": source_url,
         "probabilities": probabilities,
     }
+    if stage_probabilities is not None:
+        output["stage_probabilities"] = stage_probabilities
     if model_updated_at:
         output["model_updated_at"] = model_updated_at
 
@@ -132,8 +150,8 @@ def main():
     source = sys.argv[1]
     print(f"Fetching from {source}...")
 
-    probabilities, source_url, model_updated_at = SOURCES[source]()
-    filename = save(source, probabilities, source_url, model_updated_at)
+    probabilities, stage_probabilities, source_url, model_updated_at = SOURCES[source]()
+    filename = save(source, probabilities, source_url, model_updated_at, stage_probabilities)
 
     if filename is None:
         print(f"\nProbabilities unchanged — no new file written")

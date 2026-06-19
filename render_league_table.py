@@ -26,6 +26,16 @@ SOURCE_URLS = {
     "opta": "https://theanalyst.com/competition/fifa-world-cup/predictions",
 }
 
+# Ordered list of (stage_key, dropdown_label, table_col_label, chart_y_label)
+STAGE_OPTIONS = [
+    ("winner", "Winner",           "Win chance",          "Win probability"),
+    ("final",  "Reach Final",      "Reach Final",         "Final probability"),
+    ("sf",     "Reach Semi-finals","Reach Semi-finals",   "Semi-final probability"),
+    ("qf",     "Reach Quarter-finals", "Reach Quarter-finals", "Quarter-final probability"),
+    ("last16", "Reach Last 16",    "Reach Last 16",       "Last 16 probability"),
+    ("last32", "Reach Last 32",    "Reach Last 32",       "Last 32 probability"),
+]
+
 # Canonical full name → 3-letter code (used to normalise DTAI data)
 COUNTRY_CODES = {
     "Algeria": "ALG", "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT",
@@ -65,6 +75,17 @@ PLAYER_COLORS = [
 ]
 
 
+def _normalise(raw):
+    """Translate 3-letter codes to full names; pass through full names unchanged."""
+    normalised = {}
+    for key, prob in raw.items():
+        if key in CODE_TO_COUNTRY:
+            normalised[CODE_TO_COUNTRY[key]] = prob
+        else:
+            normalised[key] = prob
+    return normalised
+
+
 def load_latest_for_source(source):
     files = sorted(glob.glob(os.path.join(source, "probabilities_*.json")))
     if not files:
@@ -77,37 +98,39 @@ def load_latest_for_source(source):
         data = json.load(f)
     print(f"  {source}: {latest} (fetched at {data['fetched_at']})")
 
-    # Normalise keys to full country names
-    raw = data["probabilities"]
-    normalised = {}
-    for key, prob in raw.items():
-        if key in CODE_TO_COUNTRY:
-            normalised[CODE_TO_COUNTRY[key]] = prob
-        else:
-            normalised[key] = prob  # already a full name (Opta)
+    raw_stage = data.get("stage_probabilities")
+    if raw_stage:
+        stage_probs = {key: _normalise(raw) for key, raw in raw_stage.items()}
+    else:
+        # Old format: only winner data available
+        stage_probs = {"winner": _normalise(data["probabilities"])}
 
-    return normalised, data["fetched_at"]
+    return stage_probs, data["fetched_at"]
 
 
 def load_and_average(sources):
-    all_probs = []
+    all_stage_probs = []
     fetched_ats = []
 
     for source in sources:
-        probs, fetched_at = load_latest_for_source(source)
-        all_probs.append(probs)
+        stage_probs, fetched_at = load_latest_for_source(source)
+        all_stage_probs.append(stage_probs)
         fetched_ats.append(fetched_at)
 
-    all_countries = set().union(*[p.keys() for p in all_probs])
-    averaged = {
-        country: sum(p.get(country, 0.0) for p in all_probs) / len(all_probs)
-        for country in all_countries
-    }
+    all_keys = set().union(*[sp.keys() for sp in all_stage_probs])
+    averaged = {}
+    for key in all_keys:
+        probs_with_data = [sp[key] for sp in all_stage_probs if key in sp]
+        all_countries = set().union(*[p.keys() for p in probs_with_data])
+        averaged[key] = {
+            country: sum(p.get(country, 0.0) for p in probs_with_data) / len(probs_with_data)
+            for country in all_countries
+        }
     return averaged, fetched_ats
 
 
 def load_all_for_sources(sources):
-    """Returns list of (datetime_str, probabilities) for all historical files."""
+    """Returns list of (datetime_str, stage_probs_dict) for all historical files."""
     entries = []
 
     for source in sources:
@@ -115,27 +138,30 @@ def load_all_for_sources(sources):
         for filepath in files:
             with open(filepath) as f:
                 data = json.load(f)
-            raw = data["probabilities"]
-            normalised = {}
-            for key, prob in raw.items():
-                if key in CODE_TO_COUNTRY:
-                    normalised[CODE_TO_COUNTRY[key]] = prob
-                else:
-                    normalised[key] = prob
+
+            raw_stage = data.get("stage_probabilities")
+            if raw_stage:
+                stage_probs = {key: _normalise(raw) for key, raw in raw_stage.items()}
+            else:
+                stage_probs = {"winner": _normalise(data["probabilities"])}
+
             fetched_at = datetime.fromisoformat(data["fetched_at"])
             datetime_str = fetched_at.strftime("%Y-%m-%dT%H:%M:%S")
-            entries.append((datetime_str, normalised))
+            entries.append((datetime_str, stage_probs))
 
     entries.sort(key=lambda x: x[0])
     return entries
 
 
-def build_historical_series(sweepstake, historical_data):
-    """Returns list of {name, data: [{x, y}]} per player, in current standings order."""
+def build_historical_series(sweepstake, historical_data, stage_key="winner"):
+    """Returns list of {name, data: [{x, y}]} per player, skipping entries without stage data."""
     series = []
     for person in sweepstake:
         data_points = []
-        for date_str, probs in historical_data:
+        for date_str, stage_probs in historical_data:
+            probs = stage_probs.get(stage_key)
+            if not probs:
+                continue
             total = sum(probs.get(country, 0.0) for country in person["countries"])
             data_points.append({"x": date_str, "y": round(total * 100, 2)})
         series.append({"name": person["name"], "data": data_points})
@@ -193,7 +219,7 @@ def build_standings(sweepstake, probabilities):
     return standings
 
 
-def render_html(standings, sources, fetched_ats, historical_series, avatars=None):
+def render_html(all_standings, all_historical_series, sources, fetched_ats, avatars=None):
     if len(sources) == 1:
         source_label = SOURCE_LABELS[sources[0]]
         source_desc = f'<a href="{SOURCE_URLS[sources[0]]}" style="color:#3a6a99">{source_label}</a>'
@@ -207,51 +233,74 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
     latest_fetch = max(fetched_ats)
     fetched_str = datetime.fromisoformat(latest_fetch).strftime("%d %b %Y, %H:%M UTC")
 
-    # Map player name → chart colour (assigned by position in historical_series)
+    # Color assignment from winner historical series (sweepstake order = consistent across stages)
+    base_series = all_historical_series.get("winner") or next(iter(all_historical_series.values()), [])
     player_color = {
         s["name"]: PLAYER_COLORS[i % len(PLAYER_COLORS)]
-        for i, s in enumerate(historical_series)
+        for i, s in enumerate(base_series)
     }
 
     def avatar_src(name):
         return avatars.get(name.lower()) or initials_svg(name, player_color.get(name, "#7a8499"))
 
-    # Build avatar map for JS legend: {lowercase_name: data_uri}
     avatar_json = json.dumps({
         s["name"].lower(): avatar_src(s["name"])
-        for s in historical_series
+        for s in base_series
     })
 
-    rows = ""
-    for i, entry in enumerate(standings, 1):
-        country_pills = ""
-        for c in sorted(entry["countries"], key=lambda x: x["prob"], reverse=True):
-            flag = FLAG_EMOJIS.get(c["code"], "🏳️")
-            country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
-
-        medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, "")
-        av = avatar_src(entry["name"])
-        rows += f"""
+    # Build table rows for each stage
+    all_tbody_html = ""
+    for stage_key, _, _, _ in STAGE_OPTIONS:
+        standings = all_standings.get(stage_key, [])
+        rows = ""
+        for i, entry in enumerate(standings, 1):
+            country_pills = ""
+            for c in sorted(entry["countries"], key=lambda x: x["prob"], reverse=True):
+                flag = FLAG_EMOJIS.get(c["code"], "🏳️")
+                country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
+            medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, "")
+            av = avatar_src(entry["name"])
+            rows += f"""
         <tr class="{'top3' if i <= 3 else ''}">
             <td class="rank">{medal or i}</td>
             <td class="person"><div class="person-cell"><img class="avatar" src="{av}" alt="{entry['name']}"><span>{entry['name']}</span></div></td>
             <td class="countries">{country_pills}</td>
             <td class="total">{entry['total']:.1%}</td>
         </tr>"""
+        display = "" if stage_key == "winner" else ' style="display:none"'
+        all_tbody_html += f'<tbody id="tbody-{stage_key}"{display}>{rows}\n        </tbody>'
 
-    chart_datasets = json.dumps([
-        {
-            "label": s["name"],
-            "data": s["data"],
-            "borderColor": PLAYER_COLORS[i % len(PLAYER_COLORS)],
-            "backgroundColor": "transparent",
-            "tension": 0.3,
-            "pointRadius": 0,
-            "pointHoverRadius": 5,
-            "borderWidth": 2,
-        }
-        for i, s in enumerate(historical_series)
-    ])
+    # Build all chart datasets per stage
+    all_chart_datasets = {}
+    for stage_key, _, _, _ in STAGE_OPTIONS:
+        historical_series = all_historical_series.get(stage_key, [])
+        all_chart_datasets[stage_key] = [
+            {
+                "label": s["name"],
+                "data": s["data"],
+                "borderColor": player_color.get(s["name"], PLAYER_COLORS[0]),
+                "backgroundColor": "transparent",
+                "tension": 0.3,
+                "pointRadius": 0,
+                "pointHoverRadius": 5,
+                "borderWidth": 2,
+            }
+            for s in historical_series
+        ]
+
+    all_datasets_json = json.dumps(all_chart_datasets)
+
+    # Stage metadata for JS
+    stage_col_labels = {key: col for key, _, col, _ in STAGE_OPTIONS}
+    stage_chart_labels = {key: chart for key, _, _, chart in STAGE_OPTIONS}
+    stage_col_labels_json = json.dumps(stage_col_labels)
+    stage_chart_labels_json = json.dumps(stage_chart_labels)
+
+    # Dropdown options HTML
+    options_html = "\n".join(
+        f'        <option value="{key}"{" selected" if key == "winner" else ""}>{label}</option>'
+        for key, label, _, _ in STAGE_OPTIONS
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -282,11 +331,16 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
       margin-bottom: 0.4rem;
     }}
     header p {{ color: #7a8499; font-size: 0.85rem; }}
+    .controls {{
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      border-bottom: 1px solid #1e2d45;
+      margin-bottom: 1.5rem;
+    }}
     .tabs {{
       display: flex;
       gap: 0.5rem;
-      margin-bottom: 1.5rem;
-      border-bottom: 1px solid #1e2d45;
       padding-bottom: 0;
     }}
     .tab-btn {{
@@ -305,6 +359,29 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
     .tab-btn.active {{
       color: #f5c842;
       border-bottom-color: #f5c842;
+    }}
+    .stage-filter {{
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding-bottom: 0.6rem;
+    }}
+    .stage-filter label {{
+      color: #7a8499;
+      font-size: 0.85rem;
+    }}
+    .stage-filter select {{
+      background: #1a2d47;
+      color: #e8eaf0;
+      border: 1px solid #1e2d45;
+      border-radius: 6px;
+      padding: 0.3rem 0.7rem;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }}
+    .stage-filter select:focus {{
+      outline: none;
+      border-color: #f5c842;
     }}
     .tab-page {{ display: none; }}
     .tab-page.active {{ display: block; }}
@@ -365,11 +442,19 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
   <div class="container">
     <header>
       <h1>⚽ World Cup 2026 Sweepstake</h1>
-      <p>Win probabilities from {source_desc} &mdash; updated {fetched_str}</p>
+      <p>Probabilities from {source_desc} &mdash; updated {fetched_str}</p>
     </header>
-    <div class="tabs">
-      <button class="tab-btn active" onclick="showTab('table')">League Table</button>
-      <button class="tab-btn" onclick="showTab('history')">History</button>
+    <div class="controls">
+      <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('table', event)">League Table</button>
+        <button class="tab-btn" onclick="showTab('history', event)">History</button>
+      </div>
+      <div class="stage-filter">
+        <label for="stage-select">Stage:</label>
+        <select id="stage-select" onchange="setStage(this.value)">
+{options_html}
+        </select>
+      </div>
     </div>
     <div id="page-table" class="tab-page active">
       <table>
@@ -378,11 +463,10 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
             <th></th>
             <th>Player</th>
             <th>Countries</th>
-            <th style="text-align:right">Win chance</th>
+            <th style="text-align:right" id="prob-col-header">Win chance</th>
           </tr>
         </thead>
-        <tbody>{rows}
-        </tbody>
+        {all_tbody_html}
       </table>
     </div>
     <div id="page-history" class="tab-page">
@@ -395,22 +479,53 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
     </div>
   </div>
   <script>
-    function showTab(name) {{
+    const allDatasets = {all_datasets_json};
+    const stageColLabels = {stage_col_labels_json};
+    const stageChartLabels = {stage_chart_labels_json};
+    const avatarData = {avatar_json};
+
+    function showTab(name, event) {{
       document.querySelectorAll('.tab-page').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById('page-' + name).classList.add('active');
       event.currentTarget.classList.add('active');
     }}
 
-    const datasets = {chart_datasets};
-    const avatarData = {avatar_json};
-    const sortedDatasets = [...datasets].sort((a, b) => {{
-      const latestY = ds => ds.data[ds.data.length - 1].y;
-      return latestY(b) - latestY(a);
-    }});
-    new Chart(document.getElementById('historyChart'), {{
+    function sortDatasets(datasets) {{
+      return [...datasets].sort((a, b) => {{
+        const latestY = ds => ds.data.length ? ds.data[ds.data.length - 1].y : 0;
+        return latestY(b) - latestY(a);
+      }});
+    }}
+
+    function buildLegend(sortedDatasets) {{
+      const legendEl = document.getElementById('chart-legend');
+      legendEl.innerHTML = '';
+      sortedDatasets.forEach(ds => {{
+        const src = avatarData[ds.label.toLowerCase()] || '';
+        const item = document.createElement('div');
+        item.className = 'legend-item';
+        item.innerHTML = `<img class="legend-avatar" src="${{src}}" style="border-color:${{ds.borderColor}}" alt="${{ds.label}}"><span>${{ds.label}}</span>`;
+        legendEl.appendChild(item);
+      }});
+    }}
+
+    function setStage(stageKey) {{
+      document.querySelectorAll('[id^="tbody-"]').forEach(el => el.style.display = 'none');
+      const tbody = document.getElementById('tbody-' + stageKey);
+      if (tbody) tbody.style.display = '';
+      document.getElementById('prob-col-header').textContent = stageColLabels[stageKey] || stageKey;
+      const sortedDatasets = sortDatasets(allDatasets[stageKey] || []);
+      historyChart.data.datasets = sortedDatasets;
+      historyChart.options.scales.y.title.text = stageChartLabels[stageKey] || stageKey;
+      historyChart.update();
+      buildLegend(sortedDatasets);
+    }}
+
+    const initialSorted = sortDatasets(allDatasets['winner'] || []);
+    const historyChart = new Chart(document.getElementById('historyChart'), {{
       type: 'line',
-      data: {{ datasets: sortedDatasets }},
+      data: {{ datasets: initialSorted }},
       options: {{
         responsive: true,
         maintainAspectRatio: false,
@@ -450,15 +565,7 @@ def render_html(standings, sources, fetched_ats, historical_series, avatars=None
         }},
       }},
     }});
-    // Build custom avatar legend in sorted order
-    const legendEl = document.getElementById('chart-legend');
-    sortedDatasets.forEach(ds => {{
-      const src = avatarData[ds.label.toLowerCase()] || '';
-      const item = document.createElement('div');
-      item.className = 'legend-item';
-      item.innerHTML = `<img class="legend-avatar" src="${{src}}" style="border-color:${{ds.borderColor}}" alt="${{ds.label}}"><span>${{ds.label}}</span>`;
-      legendEl.appendChild(item);
-    }});
+    buildLegend(initialSorted);
   </script>
 </body>
 </html>"""
@@ -480,22 +587,29 @@ def main():
     sources = list(dict.fromkeys(args))  # deduplicate, preserve order
 
     print("Loading probabilities...")
-    probabilities, fetched_ats = load_and_average(sources)
+    stage_probs, fetched_ats = load_and_average(sources)
 
     sweepstake = load_sweepstake()
-    standings = build_standings(sweepstake, probabilities)
     historical_data = load_all_for_sources(sources)
-    historical_series = build_historical_series(sweepstake, historical_data)
+
+    all_standings = {}
+    all_historical_series = {}
+    for stage_key, _, _, _ in STAGE_OPTIONS:
+        if stage_key in stage_probs:
+            all_standings[stage_key] = build_standings(sweepstake, stage_probs[stage_key])
+        all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key)
+
     avatars = load_avatars()
-    html = render_html(standings, sources, fetched_ats, historical_series, avatars)
+    html = render_html(all_standings, all_historical_series, sources, fetched_ats, avatars)
 
     with open("index.html", "w") as f:
         f.write(html)
 
     print(f"\nLeague table written to index.html\n")
+    winner_standings = all_standings.get("winner", [])
     print(f"{'Rank':<5} {'Player':<10} {'Win Chance'}")
     print("-" * 30)
-    for i, entry in enumerate(standings, 1):
+    for i, entry in enumerate(winner_standings, 1):
         print(f"{i:<5} {entry['name']:<10} {entry['total']:.1%}")
 
 
