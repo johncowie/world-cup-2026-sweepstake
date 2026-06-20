@@ -431,9 +431,8 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
     .pill-eliminated {{ opacity: 0.35; text-decoration: line-through; text-decoration-color: #7a8499; }}
     footer {{ text-align: center; margin-top: 2.5rem; color: #3a4a60; font-size: 0.8rem; }}
     footer a {{ color: #3a6a99; text-decoration: none; }}
-    #page-history {{ height: calc(100vh - 160px); display: flex; flex-direction: column; }}
-    .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; flex: 1; min-height: 0; }}
-    .chart-wrap {{ flex: 1; position: relative; height: 100%; min-width: 0; }}
+    .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
+    .chart-wrap {{ flex: 1; position: relative; min-width: 0; }}
     .chart-legend {{ flex-shrink: 0; display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.25rem; }}
     .legend-item {{ display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; color: #e8eaf0; }}
     .legend-avatar {{ width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 2.5px solid; flex-shrink: 0; }}
@@ -485,12 +484,26 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
     const stageChartLabels = {stage_chart_labels_json};
     const avatarData = {avatar_json};
 
+    function fitChartHeight() {{
+      const wrap = document.querySelector('.chart-wrap');
+      if (!wrap) return;
+      const top = wrap.getBoundingClientRect().top + window.scrollY;
+      const bodyPadBottom = parseFloat(getComputedStyle(document.body).paddingBottom);
+      wrap.style.height = (window.innerHeight - top - bodyPadBottom) + 'px';
+      if (window.historyChart) window.historyChart.resize();
+    }}
+
     function showTab(name, event) {{
       document.querySelectorAll('.tab-page').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
       document.getElementById('page-' + name).classList.add('active');
       event.currentTarget.classList.add('active');
+      if (name === 'history') fitChartHeight();
     }}
+
+    window.addEventListener('resize', () => {{
+      if (document.getElementById('page-history').classList.contains('active')) fitChartHeight();
+    }});
 
     function sortDatasets(datasets) {{
       return [...datasets].sort((a, b) => {{
@@ -531,9 +544,22 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
           if (pt.y > maxY) maxY = pt.y;
         }}
       }}
-      if (minY === Infinity) return {{ min: 0, max: 100 }};
-      const pad = (maxY - minY) * 0.05 + 0.5;
-      return {{ min: Math.max(0, minY - pad), max: Math.min(100, maxY + pad) }};
+      if (minY === Infinity) return {{ min: 0, max: 100, step: 10 }};
+      const range = maxY - minY || 1;
+      const rough = range / 4;
+      const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+      const norm = rough / mag;
+      let step;
+      if (norm <= 1) step = 1;
+      else if (norm <= 2) step = 2;
+      else if (norm <= 5) step = 5;
+      else step = 10;
+      step *= mag;
+      return {{
+        min: Math.max(0, Math.floor(minY / step) * step),
+        max: Math.min(100, Math.ceil(maxY / step) * step),
+        step,
+      }};
     }}
 
     function setStage(stageKey) {{
@@ -547,6 +573,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
       historyChart.options.scales.y.title.text = stageChartLabels[stageKey] || stageKey;
       historyChart.options.scales.y.min = yBounds.min;
       historyChart.options.scales.y.max = yBounds.max;
+      historyChart.options.scales.y.ticks.stepSize = yBounds.step;
       historyChart.options.scales.x.min = stageMinDate(stageKey);
       historyChart.update();
       buildLegend(sortedDatasets);
@@ -576,6 +603,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
             grid: {{ color: '#1e2d45' }},
             ticks: {{
               color: '#7a8499',
+              stepSize: initialYBounds.step,
               callback: v => v + '%',
             }},
             title: {{ display: true, text: 'Win probability', color: '#7a8499' }},
@@ -597,6 +625,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
         }},
       }},
     }});
+    window.historyChart = historyChart;
     buildLegend(initialSorted);
   </script>
 </body>

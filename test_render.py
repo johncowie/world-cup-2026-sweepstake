@@ -138,13 +138,23 @@ class TestRenderedHTML(unittest.TestCase):
         self.assertIn("function stageYBounds(stageKey)", HTML)
         self.assertIn("historyChart.options.scales.y.min = yBounds.min", HTML)
         self.assertIn("historyChart.options.scales.y.max = yBounds.max", HTML)
+        self.assertIn("historyChart.options.scales.y.ticks.stepSize = yBounds.step", HTML)
         self.assertIn("min: initialYBounds.min", HTML)
         self.assertIn("max: initialYBounds.max", HTML)
+        self.assertIn("stepSize: initialYBounds.step", HTML)
+
+    def test_y_axis_snaps_to_tick_interval(self):
+        # min/max should be floored/ceiled to the nearest computed step interval.
+        # e.g. data range 3%–17% → step=5, min=0, max=20.
+        self.assertIn("Math.floor(minY / step) * step", HTML)
+        self.assertIn("Math.ceil(maxY / step) * step", HTML)
 
     def test_history_chart_fills_screen_vertically(self):
-        # Chart container should use viewport height, not a fixed pixel height.
-        self.assertIn("100vh", HTML)
+        # Chart height is set via JS to exactly fill the viewport without scrolling.
+        self.assertIn("function fitChartHeight()", HTML)
+        self.assertIn("window.innerHeight", HTML)
         self.assertNotIn("height: 500px", HTML)
+        self.assertNotIn("calc(100vh", HTML)
 
     def test_all_datasets_json_has_all_stages(self):
         # allDatasets JS object should include all stage keys
