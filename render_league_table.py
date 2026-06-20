@@ -431,8 +431,9 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
     .pill-eliminated {{ opacity: 0.35; text-decoration: line-through; text-decoration-color: #7a8499; }}
     footer {{ text-align: center; margin-top: 2.5rem; color: #3a4a60; font-size: 0.8rem; }}
     footer a {{ color: #3a6a99; text-decoration: none; }}
-    .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
-    .chart-wrap {{ flex: 1; position: relative; height: 500px; min-width: 0; }}
+    #page-history {{ height: calc(100vh - 160px); display: flex; flex-direction: column; }}
+    .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; flex: 1; min-height: 0; }}
+    .chart-wrap {{ flex: 1; position: relative; height: 100%; min-width: 0; }}
     .chart-legend {{ flex-shrink: 0; display: flex; flex-direction: column; gap: 0.35rem; padding-top: 0.25rem; }}
     .legend-item {{ display: flex; align-items: center; gap: 0.45rem; font-size: 0.82rem; color: #e8eaf0; }}
     .legend-avatar {{ width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 2.5px solid; flex-shrink: 0; }}
@@ -521,20 +522,38 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
       return min;
     }}
 
+    function stageYBounds(stageKey) {{
+      const datasets = allDatasets[stageKey] || [];
+      let minY = Infinity, maxY = -Infinity;
+      for (const ds of datasets) {{
+        for (const pt of ds.data) {{
+          if (pt.y < minY) minY = pt.y;
+          if (pt.y > maxY) maxY = pt.y;
+        }}
+      }}
+      if (minY === Infinity) return {{ min: 0, max: 100 }};
+      const pad = (maxY - minY) * 0.05 + 0.5;
+      return {{ min: Math.max(0, minY - pad), max: Math.min(100, maxY + pad) }};
+    }}
+
     function setStage(stageKey) {{
       document.querySelectorAll('[id^="tbody-"]').forEach(el => el.style.display = 'none');
       const tbody = document.getElementById('tbody-' + stageKey);
       if (tbody) tbody.style.display = '';
       document.getElementById('prob-col-header').textContent = stageColLabels[stageKey] || stageKey;
       const sortedDatasets = sortDatasets(allDatasets[stageKey] || []);
+      const yBounds = stageYBounds(stageKey);
       historyChart.data.datasets = sortedDatasets;
       historyChart.options.scales.y.title.text = stageChartLabels[stageKey] || stageKey;
+      historyChart.options.scales.y.min = yBounds.min;
+      historyChart.options.scales.y.max = yBounds.max;
       historyChart.options.scales.x.min = stageMinDate(stageKey);
       historyChart.update();
       buildLegend(sortedDatasets);
     }}
 
     const initialSorted = sortDatasets(allDatasets['winner'] || []);
+    const initialYBounds = stageYBounds('winner');
     const historyChart = new Chart(document.getElementById('historyChart'), {{
       type: 'line',
       data: {{ datasets: initialSorted }},
@@ -552,7 +571,8 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
             ticks: {{ color: '#7a8499' }},
           }},
           y: {{
-            min: 0,
+            min: initialYBounds.min,
+            max: initialYBounds.max,
             grid: {{ color: '#1e2d45' }},
             ticks: {{
               color: '#7a8499',

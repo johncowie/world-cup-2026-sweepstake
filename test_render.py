@@ -133,6 +133,19 @@ class TestRenderedHTML(unittest.TestCase):
         self.assertIn("historyChart.options.scales.x.min = stageMinDate(stageKey)", HTML)
         self.assertIn("min: stageMinDate('winner')", HTML)
 
+    def test_y_axis_bounds_computed_from_data(self):
+        # y-axis min/max should be derived from data per stage, not hardcoded 0.
+        self.assertIn("function stageYBounds(stageKey)", HTML)
+        self.assertIn("historyChart.options.scales.y.min = yBounds.min", HTML)
+        self.assertIn("historyChart.options.scales.y.max = yBounds.max", HTML)
+        self.assertIn("min: initialYBounds.min", HTML)
+        self.assertIn("max: initialYBounds.max", HTML)
+
+    def test_history_chart_fills_screen_vertically(self):
+        # Chart container should use viewport height, not a fixed pixel height.
+        self.assertIn("100vh", HTML)
+        self.assertNotIn("height: 500px", HTML)
+
     def test_all_datasets_json_has_all_stages(self):
         # allDatasets JS object should include all stage keys
         for key, _, _, _ in render_league_table.STAGE_OPTIONS:
