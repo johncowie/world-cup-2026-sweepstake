@@ -54,6 +54,46 @@ FLAG_EMOJIS = {
 }
 
 
+# Opta API uses different names for some countries than the sweepstake.json canonical names
+OPTA_NAME_MAP = {
+    "Bosnia-Herzegovina": "Bosnia and Herzegovina",
+    "Cabo Verde": "Cape Verde",
+    "Congo DR": "DR Congo",
+    "IR Iran": "Iran",
+    "Korea Republic": "South Korea",
+    "Türkiye": "Turkey",
+}
+
+
+def normalize_probs(probs):
+    """Rename opta country keys to canonical sweepstake names."""
+    return {OPTA_NAME_MAP.get(k, k): v for k, v in probs.items()}
+
+
+def get_current_stage(stage_probs):
+    """Returns the key of the earliest stage currently being contested.
+
+    A stage is contested if some teams are at 0.0 (eliminated) and some are
+    strictly between 0.0 and 1.0 (outcome still undecided).
+    """
+    for stage in ["last32", "last16", "qf", "sf", "final", "winner"]:
+        probs = stage_probs.get(stage, {})
+        if not probs:
+            continue
+        values = list(probs.values())
+        if any(v == 0.0 for v in values) and any(0.0 < v < 1.0 for v in values):
+            return stage
+    return None
+
+
+def get_eliminated_countries(stage_probs):
+    """Returns the set of canonical country names definitively eliminated from the current stage."""
+    current_stage = get_current_stage(stage_probs)
+    if current_stage is None:
+        return set()
+    return {name for name, prob in stage_probs.get(current_stage, {}).items() if prob == 0.0}
+
+
 PLAYER_COLORS = [
     "#f5c842", "#e8884a", "#4ac8e8", "#a8e84a", "#e84a9a",
     "#844ae8", "#4ae8a8", "#e84a4a", "#4a84e8", "#e8d04a",
@@ -75,9 +115,9 @@ def load_latest():
 
     raw_stage = data.get("stage_probabilities")
     if raw_stage:
-        stage_probs = raw_stage
+        stage_probs = {k: normalize_probs(v) for k, v in raw_stage.items()}
     else:
-        stage_probs = {"winner": data["probabilities"]}
+        stage_probs = {"winner": normalize_probs(data["probabilities"])}
 
     return stage_probs, data["fetched_at"]
 
@@ -91,7 +131,10 @@ def load_all_history():
             data = json.load(f)
 
         raw_stage = data.get("stage_probabilities")
-        stage_probs = raw_stage if raw_stage else {"winner": data["probabilities"]}
+        if raw_stage:
+            stage_probs = {k: normalize_probs(v) for k, v in raw_stage.items()}
+        else:
+            stage_probs = {"winner": normalize_probs(data["probabilities"])}
 
         fetched_at = datetime.fromisoformat(data["fetched_at"])
         datetime_str = fetched_at.strftime("%Y-%m-%dT%H:%M:%S")
@@ -160,14 +203,17 @@ def load_sweepstake():
         return json.load(f)
 
 
-def build_standings(sweepstake, probabilities):
+def build_standings(sweepstake, probabilities, eliminated=None):
+    if eliminated is None:
+        eliminated = set()
     standings = []
     for person in sweepstake:
         countries = []
         for country_name in person["countries"]:
             prob = probabilities.get(country_name, 0.0)
             code = COUNTRY_CODES.get(country_name)
-            countries.append({"name": country_name, "code": code, "prob": prob})
+            is_eliminated = country_name in eliminated
+            countries.append({"name": country_name, "code": code, "prob": prob, "eliminated": is_eliminated})
         total = combined_probability([c["prob"] for c in countries])
         standings.append({"name": person["name"], "countries": countries, "total": total})
     standings.sort(key=lambda x: x["total"], reverse=True)
@@ -205,9 +251,12 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
         rows = ""
         for i, entry in enumerate(standings, 1):
             country_pills = ""
-            for c in sorted(entry["countries"], key=lambda x: x["prob"], reverse=True):
+            for c in sorted(entry["countries"], key=lambda x: (x.get("eliminated", False), -x["prob"])):
                 flag = FLAG_EMOJIS.get(c["code"], "🏳️")
-                country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
+                if c.get("eliminated"):
+                    country_pills += f'<span class="pill pill-eliminated">{flag} {c["name"]}</span>'
+                else:
+                    country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
             medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, "")
             av = avatar_src(entry["name"])
             rows += f"""
@@ -379,6 +428,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
       white-space: nowrap;
     }}
     .pill-prob {{ color: #7a8499; font-size: 0.75rem; }}
+    .pill-eliminated {{ opacity: 0.35; text-decoration: line-through; text-decoration-color: #7a8499; }}
     footer {{ text-align: center; margin-top: 2.5rem; color: #3a4a60; font-size: 0.8rem; }}
     footer a {{ color: #3a6a99; text-decoration: none; }}
     .history-wrap {{ display: flex; gap: 1.2rem; align-items: flex-start; }}
@@ -537,6 +587,10 @@ def main():
     print("Loading probabilities...")
     stage_probs, fetched_at = load_latest()
 
+    eliminated = get_eliminated_countries(stage_probs)
+    if eliminated:
+        print(f"  Eliminated: {', '.join(sorted(eliminated))}")
+
     sweepstake = load_sweepstake()
     historical_data = load_all_history()
 
@@ -544,7 +598,7 @@ def main():
     all_historical_series = {}
     for stage_key, _, _, _ in STAGE_OPTIONS:
         if stage_key in stage_probs:
-            all_standings[stage_key] = build_standings(sweepstake, stage_probs[stage_key])
+            all_standings[stage_key] = build_standings(sweepstake, stage_probs[stage_key], eliminated)
         all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key)
 
     avatars = load_avatars()

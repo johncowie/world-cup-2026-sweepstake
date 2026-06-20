@@ -190,6 +190,110 @@ class TestCombinedProbability(unittest.TestCase):
         self.assertAlmostEqual(alice_series["data"][0]["y"], 32.0, places=5)
 
 
+STAGE_PROBS_WITH_ELIMINATED = {
+    "last32": {"Brazil": 0.85, "France": 0.70, "Haiti": 0.0, "Turkey": 0.0},
+    "winner": {"Brazil": 0.20, "France": 0.15, "Haiti": 0.0, "Turkey": 0.0},
+}
+
+STAGE_PROBS_ALL_DECIDED = {
+    # last32 fully decided: some at 1.0, some at 0.0 — no longer contested
+    "last32": {"Brazil": 1.0, "France": 1.0, "Haiti": 0.0, "Turkey": 0.0},
+    "last16": {"Brazil": 0.60, "France": 0.50, "Haiti": 0.0, "Turkey": 0.0},
+}
+
+
+SWEEPSTAKE_WITH_ELIMINATED = [
+    {"name": "Alice", "countries": ["Brazil", "Haiti"]},
+    {"name": "Bob",   "countries": ["France", "Turkey"]},
+]
+
+STANDINGS_WITH_ELIMINATED = render_league_table.build_standings(
+    SWEEPSTAKE_WITH_ELIMINATED,
+    STAGE_PROBS_WITH_ELIMINATED["last32"],
+    eliminated={"Haiti", "Turkey"},
+)
+
+HTML_WITH_ELIMINATED = render_league_table.render_html(
+    {"winner": STANDINGS_WITH_ELIMINATED},
+    {"winner": []},
+    fetched_at="2026-06-17T10:00:00+00:00",
+)
+
+
+class TestEliminatedCountries(unittest.TestCase):
+
+    def test_get_current_stage_returns_first_contested_stage(self):
+        stage = render_league_table.get_current_stage(STAGE_PROBS_WITH_ELIMINATED)
+        self.assertEqual(stage, "last32")
+
+    def test_get_current_stage_skips_fully_decided_stages(self):
+        # last32 is fully decided (all 0.0 or 1.0), so current stage should be last16
+        stage = render_league_table.get_current_stage(STAGE_PROBS_ALL_DECIDED)
+        self.assertEqual(stage, "last16")
+
+    def test_get_current_stage_returns_none_when_no_stage_probs(self):
+        stage = render_league_table.get_current_stage({})
+        self.assertIsNone(stage)
+
+    def test_get_eliminated_countries_returns_zero_prob_teams(self):
+        eliminated = render_league_table.get_eliminated_countries(STAGE_PROBS_WITH_ELIMINATED)
+        self.assertEqual(eliminated, {"Haiti", "Turkey"})
+
+    def test_get_eliminated_countries_returns_empty_when_no_stage_probs(self):
+        eliminated = render_league_table.get_eliminated_countries({})
+        self.assertEqual(eliminated, set())
+
+    def test_eliminated_flag_set_on_country(self):
+        haiti = next(c for c in STANDINGS_WITH_ELIMINATED[0]["countries"] if c["name"] == "Haiti")
+        turkey = next(c for c in STANDINGS_WITH_ELIMINATED[1]["countries"] if c["name"] == "Turkey")
+        brazil = next(c for c in STANDINGS_WITH_ELIMINATED[0]["countries"] if c["name"] == "Brazil")
+        self.assertTrue(haiti["eliminated"])
+        self.assertTrue(turkey["eliminated"])
+        self.assertFalse(brazil["eliminated"])
+
+    def test_eliminated_pill_has_strikethrough_class(self):
+        self.assertIn("pill-eliminated", HTML_WITH_ELIMINATED)
+
+    def test_eliminated_pill_has_no_probability_shown(self):
+        # Eliminated country pills should not contain pill-prob span
+        # Find the Haiti pill section and verify no probability follows it
+        idx = HTML_WITH_ELIMINATED.find("pill-eliminated")
+        snippet = HTML_WITH_ELIMINATED[idx:idx+200]
+        self.assertNotIn("pill-prob", snippet)
+
+    def test_active_pill_still_shows_probability(self):
+        # Non-eliminated countries should still show their probability
+        self.assertIn("pill-prob", HTML_WITH_ELIMINATED)
+
+    def test_eliminated_countries_sorted_last_in_pill_row(self):
+        # In Alice's row, Brazil (active) should appear before Haiti (eliminated)
+        alice_row_start = HTML_WITH_ELIMINATED.find("Alice")
+        alice_row_end = HTML_WITH_ELIMINATED.find("</tr>", alice_row_start)
+        alice_row = HTML_WITH_ELIMINATED[alice_row_start:alice_row_end]
+        brazil_pos = alice_row.find("Brazil")
+        haiti_pos = alice_row.find("Haiti")
+        self.assertLess(brazil_pos, haiti_pos)
+
+
+class TestNormalizeName(unittest.TestCase):
+
+    def test_opta_names_mapped_to_canonical(self):
+        raw = {"Türkiye": 0.0, "IR Iran": 0.45, "Korea Republic": 0.60, "Brazil": 0.20}
+        normalized = render_league_table.normalize_probs(raw)
+        self.assertIn("Turkey", normalized)
+        self.assertIn("Iran", normalized)
+        self.assertIn("South Korea", normalized)
+        self.assertIn("Brazil", normalized)
+        self.assertNotIn("Türkiye", normalized)
+        self.assertNotIn("IR Iran", normalized)
+        self.assertNotIn("Korea Republic", normalized)
+
+    def test_unmapped_names_pass_through(self):
+        raw = {"Brazil": 0.20, "France": 0.15}
+        normalized = render_league_table.normalize_probs(raw)
+        self.assertEqual(normalized, raw)
+
+
 class TestFetchProbabilities(unittest.TestCase):
 
     def _in_tmpdir(self):
