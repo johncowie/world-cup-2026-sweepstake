@@ -1,37 +1,14 @@
 #!/usr/bin/env python3
-"""Fetches World Cup 2026 win probabilities from a named source and saves as a timestamped JSON file.
+"""Fetches World Cup 2026 win probabilities from Opta and saves as a timestamped JSON file.
 
 Usage:
-    python3 fetch_probabilities.py dtai
-    python3 fetch_probabilities.py opta
+    python3 fetch_probabilities.py
 """
 
 import json
 import os
-import sys
 import urllib.request
 from datetime import datetime, timezone
-
-# --- DTAI ---
-
-DTAI_URL = "https://dtai.cs.kuleuven.be/sports/worldcup2026/data/data.json"
-
-
-def fetch_dtai():
-    with urllib.request.urlopen(DTAI_URL) as resp:
-        data = json.loads(resp.read().decode())
-
-    probabilities = {}
-    for team in data:
-        name = team.get("name")
-        prob_win = team.get("prob_win")
-        if name and prob_win is not None:
-            p = prob_win.get("p") if isinstance(prob_win, dict) else None
-            probabilities[name] = p if p is not None else 0.0
-
-    probabilities = dict(sorted(probabilities.items(), key=lambda x: x[1], reverse=True))
-    return probabilities, None, DTAI_URL, None
-
 
 # --- Opta ---
 
@@ -102,24 +79,19 @@ def fetch_opta():
     return winner_probs, stage_probabilities, OPTA_SOURCE_URL, last_updated
 
 
-# --- Common ---
-
-SOURCES = {"dtai": fetch_dtai, "opta": fetch_opta}
-
-
-def _latest_probabilities(source):
-    files = sorted(f for f in os.listdir(source) if f.startswith("probabilities_") and f.endswith(".json"))
+def _latest_probabilities():
+    files = sorted(f for f in os.listdir("opta") if f.startswith("probabilities_") and f.endswith(".json"))
     if not files:
         return None
-    with open(os.path.join(source, files[-1])) as f:
+    with open(os.path.join("opta", files[-1])) as f:
         data = json.load(f)
     return data.get("stage_probabilities") or data.get("probabilities", {})
 
 
-def save(source, probabilities, source_url, model_updated_at, stage_probabilities=None):
-    os.makedirs(source, exist_ok=True)
+def save(probabilities, source_url, model_updated_at, stage_probabilities=None):
+    os.makedirs("opta", exist_ok=True)
 
-    existing = _latest_probabilities(source)
+    existing = _latest_probabilities()
     comparable = stage_probabilities if stage_probabilities is not None else probabilities
     if existing is not None and existing == comparable:
         return None
@@ -135,26 +107,19 @@ def save(source, probabilities, source_url, model_updated_at, stage_probabilitie
     if model_updated_at:
         output["model_updated_at"] = model_updated_at
 
-    filename = os.path.join(source, f"probabilities_{timestamp}.json")
+    filename = os.path.join("opta", f"probabilities_{timestamp}.json")
     with open(filename, "w") as f:
         json.dump(output, f, indent=2)
     return filename
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in SOURCES:
-        print(f"Usage: {sys.argv[0]} <source>")
-        print(f"Sources: {', '.join(SOURCES)}")
-        sys.exit(1)
-
-    source = sys.argv[1]
-    print(f"Fetching from {source}...")
-
-    probabilities, stage_probabilities, source_url, model_updated_at = SOURCES[source]()
-    filename = save(source, probabilities, source_url, model_updated_at, stage_probabilities)
+    print("Fetching from Opta...")
+    probabilities, stage_probabilities, source_url, model_updated_at = fetch_opta()
+    filename = save(probabilities, source_url, model_updated_at, stage_probabilities)
 
     if filename is None:
-        print(f"\nProbabilities unchanged — no new file written")
+        print("\nProbabilities unchanged — no new file written")
         return
 
     print(f"\nSaved {len(probabilities)} teams to {filename}")

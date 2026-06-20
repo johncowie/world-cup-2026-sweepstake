@@ -2,29 +2,17 @@
 """Generates an HTML league table of sweepstake win probabilities.
 
 Usage:
-    python3 render_league_table.py dtai
-    python3 render_league_table.py opta
-    python3 render_league_table.py dtai opta
+    python3 render_league_table.py
 """
 
 import base64
 import glob
 import json
 import os
-import sys
 from datetime import datetime
 
-VALID_SOURCES = ["dtai", "opta"]
-
-SOURCE_LABELS = {
-    "dtai": "DTAI KU Leuven",
-    "opta": "Opta Supercomputer",
-}
-
-SOURCE_URLS = {
-    "dtai": "https://dtai.cs.kuleuven.be/sports/worldcup2026/",
-    "opta": "https://theanalyst.com/competition/fifa-world-cup/predictions",
-}
+SOURCE_LABEL = "Opta Supercomputer"
+SOURCE_URL = "https://theanalyst.com/competition/fifa-world-cup/predictions"
 
 # Ordered list of (stage_key, dropdown_label, table_col_label, chart_y_label)
 STAGE_OPTIONS = [
@@ -36,7 +24,7 @@ STAGE_OPTIONS = [
     ("last32", "Reach Last 32",    "Reach Last 32",       "Last 32 probability"),
 ]
 
-# Canonical full name → 3-letter code (used to normalise DTAI data)
+# Canonical full name → 3-letter code (used for flag emoji display)
 COUNTRY_CODES = {
     "Algeria": "ALG", "Argentina": "ARG", "Australia": "AUS", "Austria": "AUT",
     "Belgium": "BEL", "Bosnia and Herzegovina": "BIH", "Brazil": "BRA", "Canada": "CAN",
@@ -51,8 +39,6 @@ COUNTRY_CODES = {
     "Sweden": "SWE", "Switzerland": "SUI", "Tunisia": "TUN", "Turkey": "TUR",
     "United States": "USA", "Uruguay": "URU", "Uzbekistan": "UZB",
 }
-
-CODE_TO_COUNTRY = {code: name for name, code in COUNTRY_CODES.items()}
 
 FLAG_EMOJIS = {
     "ALG": "🇩🇿", "ARG": "🇦🇷", "AUS": "🇦🇺", "AUT": "🇦🇹", "BEL": "🇧🇪",
@@ -75,81 +61,42 @@ PLAYER_COLORS = [
 ]
 
 
-def _normalise(raw):
-    """Translate 3-letter codes to full names; pass through full names unchanged."""
-    normalised = {}
-    for key, prob in raw.items():
-        if key in CODE_TO_COUNTRY:
-            normalised[CODE_TO_COUNTRY[key]] = prob
-        else:
-            normalised[key] = prob
-    return normalised
-
-
-def load_latest_for_source(source):
-    files = sorted(glob.glob(os.path.join(source, "probabilities_*.json")))
+def load_latest():
+    files = sorted(glob.glob(os.path.join("opta", "probabilities_*.json")))
     if not files:
         raise FileNotFoundError(
-            f"No probabilities files found in {source}/. "
-            f"Run: python3 fetch_probabilities.py {source}"
+            "No probabilities files found in opta/. "
+            "Run: python3 fetch_probabilities.py"
         )
     latest = files[-1]
     with open(latest) as f:
         data = json.load(f)
-    print(f"  {source}: {latest} (fetched at {data['fetched_at']})")
+    print(f"  {latest} (fetched at {data['fetched_at']})")
 
     raw_stage = data.get("stage_probabilities")
     if raw_stage:
-        stage_probs = {key: _normalise(raw) for key, raw in raw_stage.items()}
+        stage_probs = raw_stage
     else:
-        # Old format: only winner data available
-        stage_probs = {"winner": _normalise(data["probabilities"])}
+        stage_probs = {"winner": data["probabilities"]}
 
     return stage_probs, data["fetched_at"]
 
 
-def load_and_average(sources):
-    all_stage_probs = []
-    fetched_ats = []
-
-    for source in sources:
-        stage_probs, fetched_at = load_latest_for_source(source)
-        all_stage_probs.append(stage_probs)
-        fetched_ats.append(fetched_at)
-
-    all_keys = set().union(*[sp.keys() for sp in all_stage_probs])
-    averaged = {}
-    for key in all_keys:
-        probs_with_data = [sp[key] for sp in all_stage_probs if key in sp]
-        all_countries = set().union(*[p.keys() for p in probs_with_data])
-        averaged[key] = {
-            country: sum(p.get(country, 0.0) for p in probs_with_data) / len(probs_with_data)
-            for country in all_countries
-        }
-    return averaged, fetched_ats
-
-
-def load_all_for_sources(sources):
-    """Returns list of (datetime_str, stage_probs_dict) for all historical files."""
+def load_all_history():
+    """Returns list of (datetime_str, stage_probs_dict) for all historical opta files."""
     entries = []
+    files = sorted(glob.glob(os.path.join("opta", "probabilities_*.json")))
+    for filepath in files:
+        with open(filepath) as f:
+            data = json.load(f)
 
-    for source in sources:
-        files = sorted(glob.glob(os.path.join(source, "probabilities_*.json")))
-        for filepath in files:
-            with open(filepath) as f:
-                data = json.load(f)
+        raw_stage = data.get("stage_probabilities")
+        stage_probs = raw_stage if raw_stage else {"winner": data["probabilities"]}
 
-            raw_stage = data.get("stage_probabilities")
-            if raw_stage:
-                stage_probs = {key: _normalise(raw) for key, raw in raw_stage.items()}
-            else:
-                stage_probs = {"winner": _normalise(data["probabilities"])}
+        fetched_at = datetime.fromisoformat(data["fetched_at"])
+        datetime_str = fetched_at.strftime("%Y-%m-%dT%H:%M:%S")
+        entries.append((datetime_str, stage_probs))
 
-            fetched_at = datetime.fromisoformat(data["fetched_at"])
-            datetime_str = fetched_at.strftime("%Y-%m-%dT%H:%M:%S")
-            entries.append((datetime_str, stage_probs))
-
-    entries.sort(key=lambda x: x[0])
     return entries
 
 
@@ -227,18 +174,13 @@ def build_standings(sweepstake, probabilities):
     return standings
 
 
-def render_html(all_standings, all_historical_series, sources, fetched_ats, avatars=None):
-    if len(sources) == 1:
-        source_label = SOURCE_LABELS[sources[0]]
-        source_desc = f'<a href="{SOURCE_URLS[sources[0]]}" style="color:#3a6a99">{source_label}</a>'
-    else:
-        links = [f'<a href="{SOURCE_URLS[s]}" style="color:#3a6a99">{SOURCE_LABELS[s]}</a>' for s in sources]
-        source_desc = "Average of " + " &amp; ".join(links)
+def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
+    source_desc = f'<a href="{SOURCE_URL}" style="color:#3a6a99">{SOURCE_LABEL}</a>'
 
     if avatars is None:
         avatars = {}
 
-    latest_fetch = max(fetched_ats)
+    latest_fetch = fetched_at
     fetched_str = datetime.fromisoformat(latest_fetch).strftime("%d %b %Y, %H:%M UTC")
 
     # Color assignment from winner historical series (sweepstake order = consistent across stages)
@@ -592,25 +534,11 @@ def render_html(all_standings, all_historical_series, sources, fetched_ats, avat
 
 
 def main():
-    args = sys.argv[1:]
-    if not args:
-        print(f"Usage: {sys.argv[0]} <source> [source ...]")
-        print(f"Sources: {', '.join(VALID_SOURCES)}")
-        sys.exit(1)
-
-    invalid = [s for s in args if s not in VALID_SOURCES]
-    if invalid:
-        print(f"Unknown source(s): {', '.join(invalid)}")
-        print(f"Valid sources: {', '.join(VALID_SOURCES)}")
-        sys.exit(1)
-
-    sources = list(dict.fromkeys(args))  # deduplicate, preserve order
-
     print("Loading probabilities...")
-    stage_probs, fetched_ats = load_and_average(sources)
+    stage_probs, fetched_at = load_latest()
 
     sweepstake = load_sweepstake()
-    historical_data = load_all_for_sources(sources)
+    historical_data = load_all_history()
 
     all_standings = {}
     all_historical_series = {}
@@ -620,7 +548,7 @@ def main():
         all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key)
 
     avatars = load_avatars()
-    html = render_html(all_standings, all_historical_series, sources, fetched_ats, avatars)
+    html = render_html(all_standings, all_historical_series, fetched_at, avatars)
 
     with open("index.html", "w") as f:
         f.write(html)

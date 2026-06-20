@@ -41,8 +41,7 @@ ALL_HISTORICAL_SERIES = {"winner": HISTORICAL_SERIES}
 HTML = render_league_table.render_html(
     ALL_STANDINGS,
     ALL_HISTORICAL_SERIES,
-    sources=["opta"],
-    fetched_ats=["2026-06-17T10:00:00+00:00"],
+    fetched_at="2026-06-17T10:00:00+00:00",
 )
 
 
@@ -78,7 +77,6 @@ class TestRenderedHTML(unittest.TestCase):
                                       "Spain": 0.30, "Germany": 0.10},
                 }, f)
             try:
-                sys.argv = ["render_league_table.py", "opta"]
                 render_league_table.main()
                 self.assertTrue(os.path.exists("index.html"))
                 self.assertFalse(os.path.exists("league_table.html"))
@@ -194,30 +192,44 @@ class TestCombinedProbability(unittest.TestCase):
 
 class TestFetchProbabilities(unittest.TestCase):
 
+    def _in_tmpdir(self):
+        """Context manager: chdir to a fresh temp dir, restore on exit."""
+        import contextlib
+        @contextlib.contextmanager
+        def _ctx():
+            orig = os.getcwd()
+            with tempfile.TemporaryDirectory() as tmpdir:
+                os.chdir(tmpdir)
+                try:
+                    yield tmpdir
+                finally:
+                    os.chdir(orig)
+        return _ctx()
+
     def test_save_skips_when_probabilities_unchanged(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with self._in_tmpdir():
             probs = {"Brazil": 0.20, "France": 0.15}
-            fetch_probabilities.save(tmpdir, probs, "http://example.com", None)
-            second = fetch_probabilities.save(tmpdir, probs, "http://example.com", None)
+            fetch_probabilities.save(probs, "http://example.com", None)
+            second = fetch_probabilities.save(probs, "http://example.com", None)
             self.assertIsNone(second)
-            self.assertEqual(len(os.listdir(tmpdir)), 1)
+            self.assertEqual(len(os.listdir("opta")), 1)
 
     def test_save_writes_when_probabilities_changed(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            fetch_probabilities.save(tmpdir, {"Brazil": 0.20}, "http://example.com", None)
-            second = fetch_probabilities.save(tmpdir, {"Brazil": 0.25}, "http://example.com", None)
+        with self._in_tmpdir():
+            fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None)
+            second = fetch_probabilities.save({"Brazil": 0.25}, "http://example.com", None)
             self.assertIsNotNone(second)
 
     def test_save_writes_when_no_existing_file(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            filename = fetch_probabilities.save(tmpdir, {"Brazil": 0.20}, "http://example.com", None)
+        with self._in_tmpdir():
+            filename = fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None)
             self.assertIsNotNone(filename)
-            self.assertEqual(len(os.listdir(tmpdir)), 1)
+            self.assertEqual(len(os.listdir("opta")), 1)
 
     def test_save_includes_stage_probabilities_when_provided(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with self._in_tmpdir():
             stage_probs = {"winner": {"Brazil": 0.20}, "sf": {"Brazil": 0.40}}
-            filename = fetch_probabilities.save(tmpdir, {"Brazil": 0.20}, "http://example.com", None, stage_probs)
+            filename = fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, stage_probs)
             assert filename is not None
             with open(filename) as f:
                 data = json.load(f)
@@ -226,12 +238,12 @@ class TestFetchProbabilities(unittest.TestCase):
             self.assertEqual(data["stage_probabilities"]["sf"]["Brazil"], 0.40)
 
     def test_save_deduplicates_on_stage_probabilities_when_provided(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
+        with self._in_tmpdir():
             stage_probs = {"winner": {"Brazil": 0.20}, "sf": {"Brazil": 0.40}}
-            fetch_probabilities.save(tmpdir, {"Brazil": 0.20}, "http://example.com", None, stage_probs)
-            second = fetch_probabilities.save(tmpdir, {"Brazil": 0.20}, "http://example.com", None, stage_probs)
+            fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, stage_probs)
+            second = fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, stage_probs)
             self.assertIsNone(second)
-            self.assertEqual(len(os.listdir(tmpdir)), 1)
+            self.assertEqual(len(os.listdir("opta")), 1)
 
 
 if __name__ == "__main__":
