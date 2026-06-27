@@ -179,17 +179,19 @@ def combined_probability(individual_probs, mutual_exclusions=None):
     return 1.0 - result
 
 
-def build_historical_series(sweepstake, historical_data, stage_key="winner"):
+def build_historical_series(sweepstake, historical_data, stage_key="winner", fixtures=None):
     """Returns list of {name, data: [{x, y}]} per player, skipping entries without stage data."""
     series = []
     for person in sweepstake:
+        country_names = person["countries"]
+        exclusions = _find_mutual_exclusions(country_names, fixtures or [])
         data_points = []
         for date_str, stage_probs in historical_data:
             probs = stage_probs.get(stage_key)
             if not probs:
                 continue
-            individual = [probs.get(country, 0.0) for country in person["countries"]]
-            total = combined_probability(individual)
+            individual = [probs.get(country, 0.0) for country in country_names]
+            total = combined_probability(individual, exclusions or None)
             data_points.append({"x": date_str, "y": round(total * 100, 2)})
         series.append({"name": person["name"], "data": data_points})
     return series
@@ -697,7 +699,7 @@ def main():
             all_standings[stage_key] = build_standings(
                 sweepstake, stage_probs[stage_key], eliminated, fixtures
             )
-        all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key)
+        all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key, fixtures)
 
     avatars = load_avatars()
     html = render_html(all_standings, all_historical_series, fetched_at, avatars)

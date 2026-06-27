@@ -182,6 +182,23 @@ class TestHistoricalSeriesStageFiltering(unittest.TestCase):
         for s in series:
             self.assertEqual(len(s["data"]), 2)
 
+    def test_historical_series_applies_mutual_exclusion(self):
+        # When Brazil and France play each other, Alice's historical points use sum not independence
+        sweepstake = [{"name": "Alice", "countries": ["Brazil", "France"]}]
+        history = [("2026-06-12T08:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}})]
+        fixtures = [["Brazil", "France"]]
+        series = render_league_table.build_historical_series(sweepstake, history, "winner", fixtures)
+        # With mutual exclusion: 0.6 + 0.3 = 0.9 → 90.0%
+        # Without: 1-(0.4*0.7) = 0.72 → 72.0%
+        self.assertAlmostEqual(series[0]["data"][0]["y"], 90.0, places=5)
+
+    def test_historical_series_without_fixtures_unchanged(self):
+        # No fixtures → original independence formula still used
+        sweepstake = [{"name": "Alice", "countries": ["Brazil", "France"]}]
+        history = [("2026-06-12T08:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}})]
+        series = render_league_table.build_historical_series(sweepstake, history, "winner")
+        self.assertAlmostEqual(series[0]["data"][0]["y"], 72.0, places=5)
+
 
 class TestCombinedProbability(unittest.TestCase):
 
