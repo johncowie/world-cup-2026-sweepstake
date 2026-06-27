@@ -124,12 +124,14 @@ def fetch_espn_groups():
     return groups
 
 
-def fetch_espn_fixtures(same_group_pairs):
-    """Return a flat list of [teamA, teamB] knockout fixture pairs.
+def fetch_espn_fixtures(same_group_pairs, confirmed_from=None):
+    """Return a list of {"teams": [teamA, teamB], "confirmed_from": date_str} dicts.
 
-    Scans the full tournament window. Excludes pairs where either team is TBD
-    and pairs where both teams are in the same group (group stage matches).
+    confirmed_from defaults to today. Scans the full tournament window, excluding
+    TBD pairs and same-group (group-stage) matches.
     """
+    if confirmed_from is None:
+        confirmed_from = date.today().isoformat()
     seen = set()
     fixtures = []
     current = ESPN_TOURNAMENT_START
@@ -149,11 +151,21 @@ def fetch_espn_fixtures(same_group_pairs):
                     pair = frozenset(teams)
                     if pair not in seen and pair not in same_group_pairs:
                         seen.add(pair)
-                        fixtures.append(sorted(teams))
+                        fixtures.append({"teams": sorted(teams), "confirmed_from": confirmed_from})
         except Exception:
             pass
         current += timedelta(days=1)
     return fixtures
+
+
+def merge_fixtures(existing, new_fixtures):
+    """Merge new fixtures into existing, keeping the earliest confirmed_from per pair."""
+    by_pair = {tuple(f["teams"]): f["confirmed_from"] for f in existing}
+    for f in new_fixtures:
+        key = tuple(f["teams"])
+        if key not in by_pair or f["confirmed_from"] < by_pair[key]:
+            by_pair[key] = f["confirmed_from"]
+    return [{"teams": list(pair), "confirmed_from": cf} for pair, cf in sorted(by_pair.items())]
 
 
 def _latest_probabilities():
@@ -170,8 +182,17 @@ def save(probabilities, source_url, model_updated_at, stage_probabilities=None, 
 
     if fixtures is not None:
         fixtures_path = os.path.join("opta", "fixtures.json")
+        existing_fixtures = []
+        if os.path.exists(fixtures_path):
+            with open(fixtures_path) as f:
+                raw = json.load(f)
+            # Migrate old flat-list format (list of lists) to new dict format
+            if raw and isinstance(raw[0], list):
+                raw = []
+            existing_fixtures = raw
+        merged = merge_fixtures(existing_fixtures, fixtures)
         with open(fixtures_path, "w") as f:
-            json.dump(fixtures, f, indent=2)
+            json.dump(merged, f, indent=2)
 
     existing = _latest_probabilities()
     comparable = stage_probabilities if stage_probabilities is not None else probabilities

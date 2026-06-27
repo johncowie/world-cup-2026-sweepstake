@@ -1,38 +1,65 @@
 [
-  [
-    "Canada",
-    "South Africa"
-  ],
-  [
-    "Brazil",
-    "Japan"
-  ],
-  [
-    "Germany",
-    "Paraguay"
-  ],
-  [
-    "Morocco",
-    "Netherlands"
-  ],
-  [
-    "C\u00f4te d'Ivoire",
-    "Norway"
-  ],
-  [
-    "France",
-    "Sweden"
-  ],
-  [
-    "Bosnia and Herzegovina",
-    "United States"
-  ],
-  [
-    "Australia",
-    "Egypt"
-  ],
-  [
-    "Argentina",
-    "Cape Verde"
-  ]
+  {
+    "teams": [
+      "Argentina",
+      "Cape Verde"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Australia",
+      "Egypt"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Bosnia and Herzegovina",
+      "United States"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Brazil",
+      "Japan"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Canada",
+      "South Africa"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "C\u00f4te d'Ivoire",
+      "Norway"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "France",
+      "Sweden"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Germany",
+      "Paraguay"
+    ],
+    "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Morocco",
+      "Netherlands"
+    ],
+    "confirmed_from": "2026-06-27"
+  }
 ]

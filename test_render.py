@@ -182,18 +182,22 @@ class TestHistoricalSeriesStageFiltering(unittest.TestCase):
         for s in series:
             self.assertEqual(len(s["data"]), 2)
 
-    def test_historical_series_applies_mutual_exclusion(self):
-        # When Brazil and France play each other, Alice's historical points use sum not independence
+    def test_historical_series_applies_mutual_exclusion_from_confirmed_date(self):
+        # Fixture confirmed 2026-06-27; snapshot on 2026-06-27 gets correction, earlier ones don't
         sweepstake = [{"name": "Alice", "countries": ["Brazil", "France"]}]
-        history = [("2026-06-12T08:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}})]
-        fixtures = [["Brazil", "France"]]
+        history = [
+            ("2026-06-12T08:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}}),
+            ("2026-06-27T10:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}}),
+        ]
+        fixtures = [{"teams": ["Brazil", "France"], "confirmed_from": "2026-06-27"}]
         series = render_league_table.build_historical_series(sweepstake, history, "winner", fixtures)
-        # With mutual exclusion: 0.6 + 0.3 = 0.9 → 90.0%
-        # Without: 1-(0.4*0.7) = 0.72 → 72.0%
-        self.assertAlmostEqual(series[0]["data"][0]["y"], 90.0, places=5)
+        # Before confirmed_from: independence → 1-(0.4*0.7) = 0.72 → 72.0%
+        self.assertAlmostEqual(series[0]["data"][0]["y"], 72.0, places=5)
+        # On confirmed_from: mutual exclusion → 0.6+0.3 = 0.9 → 90.0%
+        self.assertAlmostEqual(series[0]["data"][1]["y"], 90.0, places=5)
 
     def test_historical_series_without_fixtures_unchanged(self):
-        # No fixtures → original independence formula still used
+        # No fixtures → original independence formula used throughout
         sweepstake = [{"name": "Alice", "countries": ["Brazil", "France"]}]
         history = [("2026-06-12T08:00:00", {"winner": {"Brazil": 0.6, "France": 0.3}})]
         series = render_league_table.build_historical_series(sweepstake, history, "winner")
@@ -483,13 +487,35 @@ class TestFetchProbabilities(unittest.TestCase):
 
     def test_save_writes_fixtures_json_when_provided(self):
         with self._in_tmpdir():
-            fixtures = [["Canada", "South Africa"], ["Brazil", "Japan"]]
+            fixtures = [
+                {"teams": ["Canada", "South Africa"], "confirmed_from": "2026-06-27"},
+                {"teams": ["Brazil", "Japan"], "confirmed_from": "2026-06-29"},
+            ]
             fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, fixtures=fixtures)
             fixtures_path = os.path.join("opta", "fixtures.json")
             self.assertTrue(os.path.exists(fixtures_path))
             with open(fixtures_path) as f:
                 saved = json.load(f)
-            self.assertEqual(saved, [["Canada", "South Africa"], ["Brazil", "Japan"]])
+            by_pair = {tuple(f["teams"]): f["confirmed_from"] for f in saved}
+            self.assertEqual(by_pair[("Canada", "South Africa")], "2026-06-27")
+
+    def test_save_merges_fixtures_keeping_earliest_confirmed_from(self):
+        with self._in_tmpdir():
+            first = [{"teams": ["Canada", "South Africa"], "confirmed_from": "2026-06-27"}]
+            fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, fixtures=first)
+            second_probs = {"Brazil": 0.25}
+            second = [
+                {"teams": ["Canada", "South Africa"], "confirmed_from": "2026-06-28"},
+                {"teams": ["Brazil", "Japan"], "confirmed_from": "2026-06-28"},
+            ]
+            fetch_probabilities.save(second_probs, "http://example.com", None, fixtures=second)
+            with open(os.path.join("opta", "fixtures.json")) as f:
+                saved = json.load(f)
+            by_pair = {tuple(f["teams"]): f["confirmed_from"] for f in saved}
+            # Canada-SA keeps the earlier date
+            self.assertEqual(by_pair[("Canada", "South Africa")], "2026-06-27")
+            # Brazil-Japan uses the new date
+            self.assertEqual(by_pair[("Brazil", "Japan")], "2026-06-28")
 
     def test_save_no_fixtures_json_when_fixtures_not_provided(self):
         with self._in_tmpdir():

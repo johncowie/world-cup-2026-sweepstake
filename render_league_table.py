@@ -123,7 +123,12 @@ def load_latest():
     fixtures = []
     if os.path.exists(fixtures_path):
         with open(fixtures_path) as f:
-            fixtures = json.load(f)
+            raw = json.load(f)
+        # Migrate old flat-list format (list of lists) — treat as confirmed from epoch
+        if raw and isinstance(raw[0], list):
+            fixtures = [{"teams": pair, "confirmed_from": "2000-01-01"} for pair in raw]
+        else:
+            fixtures = raw
         print(f"  fixtures.json ({len(fixtures)} confirmed fixture(s))")
 
     return stage_probs, data["fetched_at"], fixtures
@@ -180,13 +185,23 @@ def combined_probability(individual_probs, mutual_exclusions=None):
 
 
 def build_historical_series(sweepstake, historical_data, stage_key="winner", fixtures=None):
-    """Returns list of {name, data: [{x, y}]} per player, skipping entries without stage data."""
+    """Returns list of {name, data: [{x, y}]} per player, skipping entries without stage data.
+
+    fixtures: list of {"teams": [teamA, teamB], "confirmed_from": "YYYY-MM-DD"} dicts.
+    For each historical data point, only fixtures confirmed on or before that date are used,
+    so the mutual-exclusion correction only appears from the point the fixture was known.
+    """
     series = []
     for person in sweepstake:
         country_names = person["countries"]
-        exclusions = _find_mutual_exclusions(country_names, fixtures or [])
         data_points = []
         for date_str, stage_probs in historical_data:
+            snapshot_date = date_str[:10]
+            active_pairs = [
+                f["teams"] for f in (fixtures or [])
+                if f["confirmed_from"] <= snapshot_date
+            ]
+            exclusions = _find_mutual_exclusions(country_names, active_pairs)
             probs = stage_probs.get(stage_key)
             if not probs:
                 continue
@@ -692,12 +707,14 @@ def main():
     sweepstake = load_sweepstake()
     historical_data = load_all_history()
 
+    fixture_pairs = [f["teams"] for f in fixtures]
+
     all_standings = {}
     all_historical_series = {}
     for stage_key, _, _, _ in STAGE_OPTIONS:
         if stage_key in stage_probs:
             all_standings[stage_key] = build_standings(
-                sweepstake, stage_probs[stage_key], eliminated, fixtures
+                sweepstake, stage_probs[stage_key], eliminated, fixture_pairs
             )
         all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key, fixtures)
 
