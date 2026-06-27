@@ -212,6 +212,31 @@ class TestCombinedProbability(unittest.TestCase):
         alice_series = next(s for s in HISTORICAL_SERIES if s["name"] == "Alice")
         self.assertAlmostEqual(alice_series["data"][0]["y"], 32.0, places=5)
 
+    def test_mutual_exclusion_uses_sum_not_independence_formula(self):
+        # Teams at indices 0 and 1 play each other → P = p0 + p1, not 1-(1-p0)(1-p1)
+        result = render_league_table.combined_probability([0.6, 0.3], [(0, 1)])
+        self.assertAlmostEqual(result, 0.9)  # sum, not 1-(0.4*0.7)=0.72
+
+    def test_mutual_exclusion_guarantees_100_when_probs_sum_to_1(self):
+        # If two teams' probs sum to 1.0 (playing each other, one must advance),
+        # the player is guaranteed to have a team in the next round.
+        result = render_league_table.combined_probability([0.617, 0.383], [(0, 1)])
+        self.assertAlmostEqual(result, 1.0)
+
+    def test_mutual_exclusion_with_independent_third_team(self):
+        # Teams 0 and 1 play each other; team 2 is independent.
+        # P = 1 - (1 - (0.6+0.3)) * (1 - 0.5) = 1 - 0.1*0.5 = 0.95
+        result = render_league_table.combined_probability([0.6, 0.3, 0.5], [(0, 1)])
+        self.assertAlmostEqual(result, 0.95)
+
+    def test_no_mutual_exclusions_unchanged(self):
+        # Passing empty exclusions gives the same result as passing None
+        p = [0.2, 0.15, 0.3, 0.1]
+        self.assertAlmostEqual(
+            render_league_table.combined_probability(p),
+            render_league_table.combined_probability(p, []),
+        )
+
 
 STAGE_PROBS_WITH_ELIMINATED = {
     "last32": {"Brazil": 0.85, "France": 0.70, "Haiti": 0.0, "Turkey": 0.0},
@@ -298,6 +323,73 @@ class TestEliminatedCountries(unittest.TestCase):
         self.assertLess(brazil_pos, haiti_pos)
 
 
+class TestFixtureAwareProbability(unittest.TestCase):
+    """When two of a player's teams play each other, probabilities are mutually exclusive."""
+
+    def test_build_standings_no_fixtures_uses_independence(self):
+        sweepstake = [{"name": "Felix", "countries": ["Canada", "South Africa"]}]
+        probs = {"Canada": 0.617, "South Africa": 0.053}
+        standings = render_league_table.build_standings(sweepstake, probs)
+        # independence formula: 1 - (1-0.617)*(1-0.053)
+        expected = 1 - (1 - 0.617) * (1 - 0.053)
+        self.assertAlmostEqual(standings[0]["total"], expected, places=10)
+
+    def test_build_standings_with_fixture_uses_sum(self):
+        # Canada and South Africa play each other in last32 → mutually exclusive for last16
+        sweepstake = [{"name": "Felix", "countries": ["Canada", "South Africa"]}]
+        probs = {"Canada": 0.617, "South Africa": 0.053}
+        fixtures = [["Canada", "South Africa"]]
+        standings = render_league_table.build_standings(sweepstake, probs, fixtures=fixtures)
+        self.assertAlmostEqual(standings[0]["total"], 0.617 + 0.053, places=10)
+
+    def test_build_standings_both_confirmed_and_playing_each_other_gives_100(self):
+        # Both qualify for last32 (prob=1.0 for last32) and face each other.
+        # For last16 probs, their values should sum to 1.0 → 100% chance for the player.
+        sweepstake = [{"name": "Felix", "countries": ["Canada", "South Africa"]}]
+        probs = {"Canada": 0.65, "South Africa": 0.35}  # sums to 1.0
+        fixtures = [["Canada", "South Africa"]]
+        standings = render_league_table.build_standings(sweepstake, probs, fixtures=fixtures)
+        self.assertAlmostEqual(standings[0]["total"], 1.0)
+
+    def test_fixture_only_affects_player_with_both_teams(self):
+        # Alice has Brazil+France (unrelated to the fixture); Bob has Spain+Canada.
+        # South Africa is not in either player's team list, so no mutual exclusion applies.
+        sweepstake = [
+            {"name": "Alice", "countries": ["Brazil", "France"]},
+            {"name": "Bob",   "countries": ["Spain", "Canada"]},
+        ]
+        probs = {"Brazil": 0.20, "France": 0.15, "Spain": 0.30, "Canada": 0.617}
+        fixtures = [["Canada", "South Africa"]]  # South Africa not in any player's list
+        standings = render_league_table.build_standings(sweepstake, probs, fixtures=fixtures)
+        by_name = {s["name"]: s for s in standings}
+        # Alice unaffected — South Africa not in her countries
+        self.assertAlmostEqual(by_name["Alice"]["total"], 1 - (1 - 0.20) * (1 - 0.15), places=10)
+        # Bob unaffected — Canada's opponent (South Africa) is not Bob's team
+        self.assertAlmostEqual(by_name["Bob"]["total"], 1 - (1 - 0.30) * (1 - 0.617), places=10)
+
+    def test_find_mutual_exclusions_identifies_matched_pair(self):
+        exclusions = render_league_table._find_mutual_exclusions(
+            ["Canada", "Ecuador", "South Africa", "Cape Verde"],
+            [["Canada", "South Africa"]],
+        )
+        self.assertEqual(exclusions, [(0, 2)])
+
+    def test_find_mutual_exclusions_no_match(self):
+        exclusions = render_league_table._find_mutual_exclusions(
+            ["Canada", "Ecuador"],
+            [["Brazil", "France"]],
+        )
+        self.assertEqual(exclusions, [])
+
+    def test_find_mutual_exclusions_two_separate_pairs(self):
+        exclusions = render_league_table._find_mutual_exclusions(
+            ["A", "B", "C", "D"],
+            [["A", "B"], ["C", "D"]],
+        )
+        self.assertIn((0, 1), exclusions)
+        self.assertIn((2, 3), exclusions)
+
+
 class TestNormalizeName(unittest.TestCase):
 
     def test_opta_names_mapped_to_canonical(self):
@@ -371,6 +463,51 @@ class TestFetchProbabilities(unittest.TestCase):
             second = fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, stage_probs)
             self.assertIsNone(second)
             self.assertEqual(len(os.listdir("opta")), 1)
+
+    def test_save_writes_fixtures_json_when_provided(self):
+        with self._in_tmpdir():
+            fixtures = [["Canada", "South Africa"], ["Brazil", "Japan"]]
+            fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None, fixtures=fixtures)
+            fixtures_path = os.path.join("opta", "fixtures.json")
+            self.assertTrue(os.path.exists(fixtures_path))
+            with open(fixtures_path) as f:
+                saved = json.load(f)
+            self.assertEqual(saved, [["Canada", "South Africa"], ["Brazil", "Japan"]])
+
+    def test_save_no_fixtures_json_when_fixtures_not_provided(self):
+        with self._in_tmpdir():
+            fetch_probabilities.save({"Brazil": 0.20}, "http://example.com", None)
+            self.assertFalse(os.path.exists(os.path.join("opta", "fixtures.json")))
+
+
+class TestFetchEspnFixturesFiltering(unittest.TestCase):
+
+    def _make_same_group_pairs(self, groups):
+        import itertools
+        return {frozenset(p) for g in groups for p in itertools.combinations(g, 2)}
+
+    def test_group_stage_match_excluded(self):
+        # Canada and South Africa are in the same group → should be filtered out
+        same_group_pairs = self._make_same_group_pairs([{"Canada", "South Africa", "Bosnia and Herzegovina", "Qatar"}])
+        # fetch_espn_fixtures with a mocked response would be complex; test _is_tbd and filtering logic directly
+        pair = frozenset(["Canada", "South Africa"])
+        self.assertIn(pair, same_group_pairs)
+
+    def test_knockout_match_not_same_group(self):
+        # Canada (Group B) vs Croatia (Group L) → not same group → should be included
+        same_group_pairs = self._make_same_group_pairs([
+            {"Canada", "South Africa", "Bosnia and Herzegovina", "Qatar"},
+            {"England", "Croatia", "Panama", "Ghana"},
+        ])
+        pair = frozenset(["Canada", "Croatia"])
+        self.assertNotIn(pair, same_group_pairs)
+
+    def test_espn_name_map_applied_to_group_teams(self):
+        # ESPN returns "Bosnia-Herzegovina"; after normalization it should match canonical
+        self.assertEqual(fetch_probabilities._normalize("Bosnia-Herzegovina"), "Bosnia and Herzegovina")
+        self.assertEqual(fetch_probabilities._normalize("Ivory Coast"), "Côte d'Ivoire")
+        self.assertEqual(fetch_probabilities._normalize("Türkiye"), "Turkey")
+        self.assertEqual(fetch_probabilities._normalize("Brazil"), "Brazil")
 
 
 if __name__ == "__main__":

@@ -119,7 +119,14 @@ def load_latest():
     else:
         stage_probs = {"winner": normalize_probs(data["probabilities"])}
 
-    return stage_probs, data["fetched_at"]
+    fixtures_path = os.path.join("opta", "fixtures.json")
+    fixtures = []
+    if os.path.exists(fixtures_path):
+        with open(fixtures_path) as f:
+            fixtures = json.load(f)
+        print(f"  fixtures.json ({len(fixtures)} confirmed fixture(s))")
+
+    return stage_probs, data["fetched_at"], fixtures
 
 
 def load_all_history():
@@ -143,10 +150,31 @@ def load_all_history():
     return entries
 
 
-def combined_probability(individual_probs):
-    """P(at least one succeeds) = 1 - product(1 - p) for each p."""
+def combined_probability(individual_probs, mutual_exclusions=None):
+    """P(at least one succeeds).
+
+    mutual_exclusions: list of (i, j) index pairs where teams i and j play
+    each other (mutually exclusive). Their combined contribution is p_i + p_j
+    rather than the independence formula, so 1 - (1-p_i)(1-p_j).
+    """
+    if not mutual_exclusions:
+        result = 1.0
+        for p in individual_probs:
+            result *= (1.0 - p)
+        return 1.0 - result
+
+    used = set()
+    virtual_probs = []
+    for i, j in mutual_exclusions:
+        virtual_probs.append(min(1.0, individual_probs[i] + individual_probs[j]))
+        used.add(i)
+        used.add(j)
+    for k, p in enumerate(individual_probs):
+        if k not in used:
+            virtual_probs.append(p)
+
     result = 1.0
-    for p in individual_probs:
+    for p in virtual_probs:
         result *= (1.0 - p)
     return 1.0 - result
 
@@ -203,7 +231,23 @@ def load_sweepstake():
         return json.load(f)
 
 
-def build_standings(sweepstake, probabilities, eliminated=None):
+def _find_mutual_exclusions(country_names, fixtures):
+    """Return list of (i, j) index pairs for countries from the same player that play each other."""
+    fixture_sets = [frozenset(pair) for pair in fixtures]
+    exclusions = []
+    for pair_set in fixture_sets:
+        matched = [i for i, name in enumerate(country_names) if name in pair_set]
+        if len(matched) == 2:
+            exclusions.append(tuple(matched))
+    return exclusions
+
+
+def build_standings(sweepstake, probabilities, eliminated=None, fixtures=None):
+    """
+    fixtures: list of [teamA, teamB] pairs playing each other this round.
+    When two of a player's countries meet, their combined probability is
+    p_A + p_B (mutually exclusive) rather than the independence formula.
+    """
     if eliminated is None:
         eliminated = set()
     standings = []
@@ -214,7 +258,10 @@ def build_standings(sweepstake, probabilities, eliminated=None):
             code = COUNTRY_CODES.get(country_name)
             is_eliminated = country_name in eliminated
             countries.append({"name": country_name, "code": code, "prob": prob, "eliminated": is_eliminated})
-        total = combined_probability([c["prob"] for c in countries])
+        probs = [c["prob"] for c in countries]
+        names = [c["name"] for c in countries]
+        exclusions = _find_mutual_exclusions(names, fixtures or [])
+        total = combined_probability(probs, exclusions or None)
         standings.append({"name": person["name"], "countries": countries, "total": total})
     standings.sort(key=lambda x: x["total"], reverse=True)
     return standings
@@ -634,7 +681,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
 
 def main():
     print("Loading probabilities...")
-    stage_probs, fetched_at = load_latest()
+    stage_probs, fetched_at, fixtures = load_latest()
 
     eliminated = get_eliminated_countries(stage_probs)
     if eliminated:
@@ -647,7 +694,9 @@ def main():
     all_historical_series = {}
     for stage_key, _, _, _ in STAGE_OPTIONS:
         if stage_key in stage_probs:
-            all_standings[stage_key] = build_standings(sweepstake, stage_probs[stage_key], eliminated)
+            all_standings[stage_key] = build_standings(
+                sweepstake, stage_probs[stage_key], eliminated, fixtures
+            )
         all_historical_series[stage_key] = build_historical_series(sweepstake, historical_data, stage_key)
 
     avatars = load_avatars()

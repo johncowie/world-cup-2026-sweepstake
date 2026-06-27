@@ -5,10 +5,11 @@ Usage:
     python3 fetch_probabilities.py
 """
 
+import itertools
 import json
 import os
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 # --- Opta ---
 
@@ -79,6 +80,82 @@ def fetch_opta():
     return winner_probs, stage_probabilities, OPTA_SOURCE_URL, last_updated
 
 
+# --- ESPN Fixtures ---
+
+ESPN_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard?dates={date}"
+)
+
+ESPN_NAME_MAP = {
+    "Bosnia-Herzegovina": "Bosnia and Herzegovina",
+    "Congo DR": "DR Congo",
+    "Ivory Coast": "Côte d'Ivoire",
+    "Türkiye": "Turkey",
+}
+
+ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/soccer/fifa.world/standings"
+
+# Full tournament window: group stage through final
+ESPN_TOURNAMENT_START = date(2026, 6, 11)
+ESPN_TOURNAMENT_END   = date(2026, 7, 19)
+
+_TBD_MARKERS = ("Group", "Round of", "Quarterfinal", "Semifinal", "Third Place")
+
+
+def _is_tbd(name):
+    return any(name.startswith(m) for m in _TBD_MARKERS)
+
+
+def _normalize(name):
+    return ESPN_NAME_MAP.get(name, name)
+
+
+def fetch_espn_groups():
+    """Return a set of frozensets, each containing the canonical names of teams in one group."""
+    req = urllib.request.Request(ESPN_STANDINGS_URL, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode())
+    groups = set()
+    for child in data.get("children", []):
+        entries = child.get("standings", {}).get("entries", [])
+        teams = frozenset(_normalize(e["team"]["displayName"]) for e in entries)
+        if teams:
+            groups.add(teams)
+    return groups
+
+
+def fetch_espn_fixtures(same_group_pairs):
+    """Return a flat list of [teamA, teamB] knockout fixture pairs.
+
+    Scans the full tournament window. Excludes pairs where either team is TBD
+    and pairs where both teams are in the same group (group stage matches).
+    """
+    seen = set()
+    fixtures = []
+    current = ESPN_TOURNAMENT_START
+    while current <= ESPN_TOURNAMENT_END:
+        url = ESPN_SCOREBOARD_URL.format(date=current.strftime("%Y%m%d"))
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode())
+            for event in data.get("events", []):
+                comp = event.get("competitions", [{}])[0]
+                teams = [
+                    _normalize(c["team"]["displayName"])
+                    for c in comp.get("competitors", [])
+                ]
+                if len(teams) == 2 and not any(_is_tbd(t) for t in teams):
+                    pair = frozenset(teams)
+                    if pair not in seen and pair not in same_group_pairs:
+                        seen.add(pair)
+                        fixtures.append(sorted(teams))
+        except Exception:
+            pass
+        current += timedelta(days=1)
+    return fixtures
+
+
 def _latest_probabilities():
     files = sorted(f for f in os.listdir("opta") if f.startswith("probabilities_") and f.endswith(".json"))
     if not files:
@@ -88,8 +165,13 @@ def _latest_probabilities():
     return data.get("stage_probabilities") or data.get("probabilities", {})
 
 
-def save(probabilities, source_url, model_updated_at, stage_probabilities=None):
+def save(probabilities, source_url, model_updated_at, stage_probabilities=None, fixtures=None):
     os.makedirs("opta", exist_ok=True)
+
+    if fixtures is not None:
+        fixtures_path = os.path.join("opta", "fixtures.json")
+        with open(fixtures_path, "w") as f:
+            json.dump(fixtures, f, indent=2)
 
     existing = _latest_probabilities()
     comparable = stage_probabilities if stage_probabilities is not None else probabilities
@@ -110,16 +192,24 @@ def save(probabilities, source_url, model_updated_at, stage_probabilities=None):
     filename = os.path.join("opta", f"probabilities_{timestamp}.json")
     with open(filename, "w") as f:
         json.dump(output, f, indent=2)
+
     return filename
 
 
 def main():
     print("Fetching from Opta...")
     probabilities, stage_probabilities, source_url, model_updated_at = fetch_opta()
-    filename = save(probabilities, source_url, model_updated_at, stage_probabilities)
+
+    print("Fetching fixtures from ESPN...")
+    groups = fetch_espn_groups()
+    same_group_pairs = {frozenset(pair) for group in groups for pair in itertools.combinations(group, 2)}
+    fixtures = fetch_espn_fixtures(same_group_pairs)
+    print(f"  {len(fixtures)} confirmed knockout fixture(s)")
+
+    filename = save(probabilities, source_url, model_updated_at, stage_probabilities, fixtures)
 
     if filename is None:
-        print("\nProbabilities unchanged — no new file written")
+        print("\nProbabilities unchanged — fixtures updated if changed")
         return
 
     print(f"\nSaved {len(probabilities)} teams to {filename}")
