@@ -1,6 +1,13 @@
 [
   {
     "teams": [
+      "Algeria",
+      "Switzerland"
+    ],
+    "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
       "Argentina",
       "Cape Verde"
     ],
@@ -12,6 +19,13 @@
       "Egypt"
     ],
     "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Austria",
+      "Spain"
+    ],
+    "confirmed_from": "2026-06-28"
   },
   {
     "teams": [
