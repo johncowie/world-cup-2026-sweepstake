@@ -43,6 +43,13 @@
   },
   {
     "teams": [
+      "Ecuador",
+      "Mexico"
+    ],
+    "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
       "France",
       "Sweden"
     ],
