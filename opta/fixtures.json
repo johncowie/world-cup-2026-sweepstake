@@ -15,6 +15,13 @@
   },
   {
     "teams": [
+      "Belgium",
+      "Senegal"
+    ],
+    "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
       "Bosnia and Herzegovina",
       "United States"
     ],
@@ -36,10 +43,31 @@
   },
   {
     "teams": [
+      "Colombia",
+      "Ghana"
+    ],
+    "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
+      "Croatia",
+      "Portugal"
+    ],
+    "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
       "C\u00f4te d'Ivoire",
       "Norway"
     ],
     "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "DR Congo",
+      "England"
+    ],
+    "confirmed_from": "2026-06-28"
   },
   {
     "teams": [
