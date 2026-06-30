@@ -50,6 +50,13 @@
   },
   {
     "teams": [
+      "Brazil",
+      "Norway"
+    ],
+    "confirmed_from": "2026-06-30"
+  },
+  {
+    "teams": [
       "Canada",
       "Morocco"
     ],
