@@ -106,6 +106,13 @@
   },
   {
     "teams": [
+      "England",
+      "Mexico"
+    ],
+    "confirmed_from": "2026-07-01"
+  },
+  {
+    "teams": [
       "France",
       "Paraguay"
     ],
