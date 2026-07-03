@@ -145,5 +145,12 @@
       "Netherlands"
     ],
     "confirmed_from": "2026-06-27"
+  },
+  {
+    "teams": [
+      "Portugal",
+      "Spain"
+    ],
+    "confirmed_from": "2026-07-03"
   }
 ]
