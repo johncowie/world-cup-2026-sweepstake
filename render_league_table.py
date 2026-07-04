@@ -323,9 +323,10 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
                     country_pills += f'<span class="pill">{flag} {c["name"]} <span class="pill-prob">{c["prob"]:.1%}</span></span>'
             medal = {1: "🥇", 2: "🥈", 3: "🥉"}.get(i, "")
             av = avatar_src(entry["name"])
+            rank_display = "😭" if entry["total"] == 0 else (medal or i)
             rows += f"""
         <tr class="{'top3' if i <= 3 else ''}">
-            <td class="rank">{medal or i}</td>
+            <td class="rank">{rank_display}</td>
             <td class="person"><div class="person-cell"><img class="avatar" src="{av}" alt="{entry['name']}"><span>{entry['name']}</span></div></td>
             <td class="countries">{country_pills}</td>
             <td class="total">{entry['total']:.1%}</td>

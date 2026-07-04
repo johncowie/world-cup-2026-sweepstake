@@ -343,6 +343,28 @@ class TestEliminatedCountries(unittest.TestCase):
         haiti_pos = alice_row.find("Haiti")
         self.assertLess(brazil_pos, haiti_pos)
 
+    def test_rank_shows_sob_emoji_when_all_teams_eliminated(self):
+        # Carol's only team is eliminated, so her total probability is 0
+        sweepstake = [
+            {"name": "Alice", "countries": ["Brazil"]},
+            {"name": "Carol", "countries": ["Haiti"]},
+        ]
+        probs = {"Brazil": 0.20, "Haiti": 0.0}
+        standings = render_league_table.build_standings(sweepstake, probs, eliminated={"Haiti"})
+        html = render_league_table.render_html(
+            {"winner": standings},
+            {"winner": []},
+            fetched_at="2026-06-17T10:00:00+00:00",
+        )
+        carol_row_start = html.find("Carol")
+        carol_row_before = html.rfind("<tr", 0, carol_row_start)
+        carol_row_end = html.find("</tr>", carol_row_start)
+        carol_row = html[carol_row_before:carol_row_end]
+        self.assertIn('<td class="rank">😭</td>', carol_row)
+
+    def test_rank_shows_number_when_probability_nonzero(self):
+        self.assertNotIn("😭", HTML_WITH_ELIMINATED)
+
 
 class TestFixtureAwareProbability(unittest.TestCase):
     """When two of a player's teams play each other, probabilities are mutually exclusive."""
