@@ -134,6 +134,13 @@
   },
   {
     "teams": [
+      "England",
+      "Norway"
+    ],
+    "confirmed_from": "2026-07-06"
+  },
+  {
+    "teams": [
       "France",
       "Morocco"
     ],
