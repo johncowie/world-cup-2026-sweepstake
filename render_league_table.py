@@ -577,14 +577,46 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
       }});
     }}
 
+    const hiddenPlayers = new Set();
+
+    function hexToRgba(hex, alpha) {{
+      const m = /^#([0-9a-f]{{6}})$/i.exec(hex || '');
+      if (!m) return hex;
+      const n = parseInt(m[1], 16);
+      const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+      return `rgba(${{r}}, ${{g}}, ${{b}}, ${{alpha}})`;
+    }}
+
+    function applyHiddenState() {{
+      Object.values(allDatasets).forEach(datasets => {{
+        datasets.forEach(ds => {{
+          ds.hidden = hiddenPlayers.has(ds.label.toLowerCase());
+        }});
+      }});
+    }}
+
+    function togglePlayer(label) {{
+      const key = label.toLowerCase();
+      if (hiddenPlayers.has(key)) hiddenPlayers.delete(key);
+      else hiddenPlayers.add(key);
+      applyHiddenState();
+      historyChart.update();
+      buildLegend(historyChart.data.datasets);
+    }}
+
     function buildLegend(sortedDatasets) {{
       const legendEl = document.getElementById('chart-legend');
       legendEl.innerHTML = '';
       sortedDatasets.forEach(ds => {{
         const src = avatarData[ds.label.toLowerCase()] || '';
+        const isHidden = hiddenPlayers.has(ds.label.toLowerCase());
+        const borderColor = isHidden ? hexToRgba(ds.borderColor, 0.15) : ds.borderColor;
+        const imgOpacity = isHidden ? 0.15 : 1;
         const item = document.createElement('div');
         item.className = 'legend-item';
-        item.innerHTML = `<img class="legend-avatar" src="${{src}}" style="border-color:${{ds.borderColor}}" alt="${{ds.label}}"><span>${{ds.label}}</span>`;
+        item.style.cursor = 'pointer';
+        item.innerHTML = `<img class="legend-avatar" src="${{src}}" style="border-color:${{borderColor}};opacity:${{imgOpacity}}" alt="${{ds.label}}"><span>${{ds.label}}</span>`;
+        item.addEventListener('click', () => togglePlayer(ds.label));
         legendEl.appendChild(item);
       }});
     }}
@@ -632,6 +664,7 @@ def render_html(all_standings, all_historical_series, fetched_at, avatars=None):
       const tbody = document.getElementById('tbody-' + stageKey);
       if (tbody) tbody.style.display = '';
       document.getElementById('prob-col-header').textContent = stageColLabels[stageKey] || stageKey;
+      applyHiddenState();
       const sortedDatasets = sortDatasets(allDatasets[stageKey] || []);
       const yBounds = stageYBounds(stageKey);
       historyChart.data.datasets = sortedDatasets;

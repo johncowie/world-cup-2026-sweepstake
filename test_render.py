@@ -53,6 +53,21 @@ class TestRenderedHTML(unittest.TestCase):
         self.assertIn('id="chart-legend"', HTML)
         self.assertIn("legend-avatar", HTML)
 
+    def test_legend_click_toggles_line_visibility(self):
+        # Clicking a legend item toggles the dataset's hidden flag on the chart
+        self.assertIn("togglePlayer", HTML)
+        self.assertIn("item.addEventListener('click', () => togglePlayer(ds.label))", HTML)
+        self.assertIn("ds.hidden = hiddenPlayers.has(ds.label.toLowerCase())", HTML)
+
+    def test_legend_dims_avatar_border_when_hidden(self):
+        # Hidden players' legend avatars get a low-alpha border to show toggled-off state
+        self.assertIn("hexToRgba(ds.borderColor, 0.15)", HTML)
+
+    def test_legend_dims_avatar_image_when_hidden(self):
+        # Hidden players' legend avatar images also dim, not just the border
+        self.assertIn("const imgOpacity = isHidden ? 0.15 : 1", HTML)
+        self.assertIn("opacity:${imgOpacity}", HTML)
+
     def test_datasets_sorted_by_latest_y(self):
         self.assertIn("sortDatasets", HTML)
         self.assertIn("latestY(b) - latestY(a)", HTML)
