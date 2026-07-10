@@ -170,6 +170,13 @@
   {
     "teams": [
       "France",
+      "Spain"
+    ],
+    "confirmed_from": "2026-07-10"
+  },
+  {
+    "teams": [
+      "France",
       "Sweden"
     ],
     "confirmed_from": "2026-06-27"
