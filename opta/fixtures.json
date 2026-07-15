@@ -30,6 +30,13 @@
   {
     "teams": [
       "Argentina",
+      "Spain"
+    ],
+    "confirmed_from": "2026-07-15"
+  },
+  {
+    "teams": [
+      "Argentina",
       "Switzerland"
     ],
     "confirmed_from": "2026-07-07"
@@ -145,6 +152,13 @@
       "Mexico"
     ],
     "confirmed_from": "2026-06-28"
+  },
+  {
+    "teams": [
+      "England",
+      "France"
+    ],
+    "confirmed_from": "2026-07-15"
   },
   {
     "teams": [
